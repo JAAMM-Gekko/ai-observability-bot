@@ -13,10 +13,10 @@ load_dotenv()
 
 # Configuration - REPLACE THESE VALUES
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-OTEL_ENDPOINT = "http://localhost:4328"
-SERVICE_NAME = "openai-sidecar-test"
-ENVIRONMENT = "sidecar-agent"
+# OTEL: use env so Docker can point to host (e.g. host.docker.internal:4328) or Splunk VM (10.0.0.249:4328)
+OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "http://localhost:4328").rstrip("/")
+SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "openai-sidecar-test")
+ENVIRONMENT = os.getenv("OTEL_ENVIRONMENT", "sidecar-agent")
 
 import openai
 
@@ -156,19 +156,21 @@ def setup_splunk_otel():
         return None
 
     try:
-        OTEL_ENDPOINT = "http://localhost:4328/v1/traces"
-        SERVICE_NAME = "beeai-faq-agent"
-        ENVIRONMENT = "production"
+        # Use module-level OTEL_ENDPOINT (from env); OTLP HTTP exporter expects full path
+        base = os.getenv("OTEL_ENDPOINT", "http://localhost:4328").rstrip("/")
+        otel_traces_url = base if base.endswith("/v1/traces") else f"{base}/v1/traces"
+        svc_name = os.getenv("OTEL_SERVICE_NAME", "beeai-faq-agent")
+        env_name = os.getenv("OTEL_ENVIRONMENT", "production")
 
         print(f"Setting up Splunk SignalFX OTEL integration...")
-        print(f"   Endpoint: {OTEL_ENDPOINT}")
-        print(f"   Service: {SERVICE_NAME}")
-        print(f"   Environment: {ENVIRONMENT}")
+        print(f"   Endpoint: {otel_traces_url}")
+        print(f"   Service: {svc_name}")
+        print(f"   Environment: {env_name}")
 
         resource = Resource.create({
-            "service.name": SERVICE_NAME,
+            "service.name": svc_name,
             "service.version": "1.0.0",
-            "deployment.environment": ENVIRONMENT,
+            "deployment.environment": env_name,
             "telemetry.sdk.name": "beeai-framework",
             "telemetry.sdk.version": "0.1.17"
         })
@@ -176,7 +178,7 @@ def setup_splunk_otel():
         tracer_provider = TracerProvider(resource=resource)
 
         otlp_exporter = OTLPSpanExporter(
-            endpoint=OTEL_ENDPOINT,
+            endpoint=otel_traces_url,
             headers={}
         )
 

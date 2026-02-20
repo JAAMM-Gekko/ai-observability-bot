@@ -10,6 +10,9 @@ services:
       - "8001:8001"
     env_file:
       - .env
+    # Allow container to reach OTEL collector on host: set OTEL_ENDPOINT=http://host.docker.internal:4328 in .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./my_chroma_db:/app/my_chroma_db
     restart: unless-stopped

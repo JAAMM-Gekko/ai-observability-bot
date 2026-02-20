@@ -128,10 +128,14 @@ RECIPIENT_EMAIL=support@yourcompany.com
 SMTP_SERVER=smtp.gmail.com
 SMTP_PORT=587
 
-# Optional: OpenTelemetry Configuration
-OTEL_ENDPOINT=http://localhost:4328/v1/traces
-SERVICE_NAME=beeai-faq-agent
-ENVIRONMENT=production
+# Optional: OpenTelemetry Configuration (base URL; /v1/traces is appended in code)
+OTEL_ENDPOINT=http://localhost:4328
+OTEL_SERVICE_NAME=beeai-faq-agent
+OTEL_ENVIRONMENT=production
+# When app runs in Docker and collector runs on host, use:
+# OTEL_ENDPOINT=http://host.docker.internal:4328
+# When collector is on another VM (e.g. Splunk host), use that host's private IP:
+# OTEL_ENDPOINT=http://10.0.0.249:4328
 ```
 
 **Note for Gmail users**: You'll need to create an [App Password](https://support.google.com/accounts/answer/185833) instead of using your regular password.
@@ -165,7 +169,7 @@ docker run -d \
   otel/opentelemetry-collector
 ```
 
-Configure the collector endpoint in `backend/agent.py` if different from `http://localhost:4328`.
+Set `OTEL_ENDPOINT` in `.env` if your collector is not at `http://localhost:4328` (e.g. in Docker use `http://host.docker.internal:4328`, or another VM's IP).
 
 ### 6. Start the Backend Server
 
@@ -270,18 +274,11 @@ _llm = ChatModel.from_name("openai:gpt-3.5-turbo")
 
 ### Configuring AI-SIEM (OpenLIT)
 
-In `backend/agent.py`, the OpenLIT initialization includes:
+Set these in `.env` (or they default as below):
 
-```python
-# OpenTelemetry endpoint (where Splunk collector is listening)
-OTEL_ENDPOINT = "http://localhost:4328"
-
-# Service name (appears in Splunk)
-SERVICE_NAME = "beeai-faq-agent"
-
-# Environment tag
-ENVIRONMENT = "production"
-```
+- `OTEL_ENDPOINT` – OpenTelemetry collector URL (default `http://localhost:4328`). In Docker with collector on host, use `http://host.docker.internal:4328`.
+- `OTEL_SERVICE_NAME` – Service name in Splunk (default `beeai-faq-agent`).
+- `OTEL_ENVIRONMENT` – Environment tag (default `production`).
 
 ### Customizing the Chat Widget
 
@@ -343,7 +340,7 @@ docker run -d \
 
 ### Splunk not receiving data
 - Verify the OpenTelemetry collector is running and accessible
-- Check that `OTEL_ENDPOINT` in `agent.py` matches your collector address
+- Check that `OTEL_ENDPOINT` in `.env` matches your collector address
 - Verify Splunk HEC token and URL are correct in the collector configuration
 - Check collector logs for connection errors
 
