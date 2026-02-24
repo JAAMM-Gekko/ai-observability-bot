@@ -83,9 +83,13 @@ def patched_create(*args, **kwargs):
             except Exception as e:
                 print(f"Evaluation failed: {e}")
 
-        if OTEL_AVAILABLE and tracer:
+        # Use current global TracerProvider (set at startup by setup_splunk_otel).
+        # Module-level tracer was created at import time with no-op provider, so spans
+        # would never export; get tracer at request time so Splunk receives llm.prompt/llm.response.
+        if OTEL_AVAILABLE:
              try:
-                 with tracer.start_as_current_span("openai_sidecar_intercept") as span:
+                 current_tracer = trace.get_tracer(SERVICE_NAME)
+                 with current_tracer.start_as_current_span("openai_sidecar_intercept") as span:
                     span.set_attribute("service.name", SERVICE_NAME)
                     span.set_attribute("llm.prompt", prompt)
                     span.set_attribute("llm.response", text)
@@ -229,6 +233,9 @@ def _setup_rag_system():
             _tracer_provider = setup_splunk_otel()
             if _tracer_provider:
                 _tracer = trace.get_tracer("beeai-faq-agent")
+                # So monkeypatch and any other code use the Splunk-backed provider
+                global tracer
+                tracer = trace.get_tracer(SERVICE_NAME)
                 print("OpenTelemetry tracer initialized for observability")
 
                 # Skip span export test during setup - it can block 30s if OTEL collector unreachable (e.g. Docker).
@@ -446,6 +453,15 @@ async def run_faq_agent(user_query: str) -> str:
                     workflow_span.set_attribute("workflow.response_length", len(final_answer))
                     workflow_span.set_attribute("workflow.success", True)
                     span.set_attribute("workflow.status", "success")
+
+                    # Capture end-user prompt/answer in a predictable place for Splunk searches.
+                    max_len = int(os.getenv("OTEL_TEXT_MAX_LEN", "4096"))
+                    if max_len > 0:
+                        prompt_attr = user_query if len(user_query) <= max_len else (user_query[:max_len] + "…")
+                        answer_attr = final_answer if len(final_answer) <= max_len else (final_answer[:max_len] + "…")
+                        span.set_attribute("llm.prompt", prompt_attr)
+                        span.set_attribute("llm.response", answer_attr)
+                        span.set_attribute("llm.response_length", len(final_answer))
 
                     return final_answer
 
