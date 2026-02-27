@@ -4,10 +4,12 @@ import chromadb
 import os
 
 
-EXCEL_PATH = "../higherleaf_faqs_all.xlsx"
+EXCEL_PATH = '/Users/ameliali/Desktop/Cannabis FAQ_expanded_claude.xlsx'
 EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2' 
 CHROMA_COLLECTION_NAME = "company_faqs"
-CHROMA_PERSIST_PATH = "../my_chroma_db"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CHROMA_PERSIST_PATH = os.path.join(SCRIPT_DIR, "..", "amelia_chroma_db")
+CHROMA_PERSIST_PATH = os.path.abspath(CHROMA_PERSIST_PATH)
 
 # 1. Load data from Excel
 def load_faqs_from_excel(excel_path):
@@ -17,10 +19,17 @@ def load_faqs_from_excel(excel_path):
     """
     try:
         df = pd.read_excel(excel_path)
+        df["Question"] = df["Question"].fillna("").astype(str)
+        df["Answer"] = df["Answer"].fillna("").astype(str)
         faqs = []
         for index, row in df.iterrows():
             question = row.get("Question", "").strip()
             answer = row.get("Answer", "").strip()
+
+            if question.lower() == "nan":
+                question = ""
+            if answer.lower() == "nan":
+                answer = ""
 
             if question and answer: # Only add if both question and answer are present
                 faqs.append({
