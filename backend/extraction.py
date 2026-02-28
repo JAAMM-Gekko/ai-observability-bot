@@ -1,10 +1,13 @@
+import os
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 import chromadb
-import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
-EXCEL_PATH = '/Users/ameliali/Desktop/Cannabis FAQ_expanded_claude.xlsx'
+EXCEL_PATH = os.getenv("FAQ_EXCEL_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Pemco_faqs.xlsx"))
 EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2' 
 CHROMA_COLLECTION_NAME = "company_faqs"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

@@ -1,5 +1,8 @@
 .DS_Store
 .env
+.env.*
+.envrc
+!.env.example
 .VENV
 .venv/
 venv/

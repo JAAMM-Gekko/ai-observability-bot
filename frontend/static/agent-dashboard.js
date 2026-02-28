@@ -2,6 +2,7 @@
 
 let agentId = null;
 let agentName = null;
+let agentApiKey = null;
 let websocket = null;
 let activeSessionId = null;
 let queueCheckInterval = null;
@@ -10,6 +11,7 @@ let typingTimeout = null;
 const loginScreen = document.getElementById('login-screen');
 const dashboard = document.getElementById('dashboard');
 const agentNameInput = document.getElementById('agent-name-input');
+const agentApiKeyInput = document.getElementById('agent-api-key-input');
 const loginButton = document.getElementById('login-button');
 const loggedAgentName = document.getElementById('logged-agent-name');
 const logoutButton = document.getElementById('logout-button');
@@ -36,11 +38,18 @@ async function login() {
     if (!name) return;
 
     agentName = name;
+    agentApiKey = agentApiKeyInput.value.trim();
     agentId = 'agent_' + Math.random().toString(36).substr(2, 9);
+
+    const headers = {};
+    if (agentApiKey) {
+        headers['x-agent-api-key'] = agentApiKey;
+    }
 
     try {
         const response = await fetch(`/api/agent/login?agent_id=${agentId}&name=${encodeURIComponent(name)}`, {
-            method: 'POST'
+            method: 'POST',
+            headers
         });
         const data = await response.json();
 
@@ -64,7 +73,9 @@ function showDashboard() {
 // WebSocket
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/agent/${agentId}`;
+    const wsUrl = agentApiKey
+        ? `${protocol}//${window.location.host}/ws/agent/${agentId}?api_key=${encodeURIComponent(agentApiKey)}`
+        : `${protocol}//${window.location.host}/ws/agent/${agentId}`;
 
     websocket = new WebSocket(wsUrl);
 
@@ -104,8 +115,13 @@ function startQueuePolling() {
 }
 
 async function fetchQueue() {
+    const headers = {};
+    if (agentApiKey) {
+        headers['x-agent-api-key'] = agentApiKey;
+    }
+
     try {
-        const response = await fetch('/api/agent/queue');
+        const response = await fetch('/api/agent/queue', { headers });
         const data = await response.json();
         renderQueue(data.queue);
     } catch (error) {
@@ -144,9 +160,15 @@ function renderQueue(queue) {
 
 // Chat Actions
 window.acceptChat = async (sessionId) => {
+    const headers = {};
+    if (agentApiKey) {
+        headers['x-agent-api-key'] = agentApiKey;
+    }
+
     try {
         const response = await fetch(`/api/agent/accept/${sessionId}?agent_id=${agentId}`, {
-            method: 'POST'
+            method: 'POST',
+            headers
         });
         const data = await response.json();
 
@@ -230,9 +252,15 @@ returnToAiButton.addEventListener('click', () => endChat(true));
 async function endChat(returnToAi) {
     if (!activeSessionId) return;
 
+    const headers = {};
+    if (agentApiKey) {
+        headers['x-agent-api-key'] = agentApiKey;
+    }
+
     try {
         const response = await fetch(`/api/agent/end/${activeSessionId}?return_to_ai=${returnToAi}`, {
-            method: 'POST'
+            method: 'POST',
+            headers
         });
         const data = await response.json();
 

@@ -119,6 +119,12 @@ Create a `.env` file in the project root:
 # Required: OpenAI API Key
 OPENAI_API_KEY=sk-your-openai-api-key-here
 
+# Recommended: Lock down allowed browser origins (comma-separated)
+CORS_ORIGINS=http://localhost,http://localhost:8001
+
+# Recommended: Protect live-agent APIs and WebSocket with a shared key
+AGENT_API_KEY=replace-with-strong-random-key
+
 # Required: Email Configuration (for escalation notifications)
 SENDER_EMAIL=your-email@gmail.com
 SENDER_PASSWORD=your-gmail-app-password
@@ -136,6 +142,9 @@ OTEL_ENVIRONMENT=production
 # OTEL_ENDPOINT=http://host.docker.internal:4328
 # When collector is on another VM (e.g. Splunk host), use that host's private IP:
 # OTEL_ENDPOINT=http://10.0.0.249:4328
+
+# Optional: Path to FAQ spreadsheet used by backend/extraction.py
+FAQ_EXCEL_PATH=./Pemco_faqs.xlsx
 ```
 
 **Note for Gmail users**: You'll need to create an [App Password](https://support.google.com/accounts/answer/185833) instead of using your regular password.
@@ -148,7 +157,8 @@ OTEL_ENVIRONMENT=production
 
 2. Place the file in the project root directory
 
-3. Run the extraction script to load FAQs into the vector database:
+3. Run the extraction script to load FAQs into the vector database
+   (`FAQ_EXCEL_PATH` from `.env` is used):
 
 ```bash
 python backend/extraction.py
@@ -185,6 +195,8 @@ The server will start on `http://localhost:8001`
 ### 7. Open the Frontend
 
 Open `frontend/index.html` in your web browser, or serve it through the FastAPI server by visiting `http://localhost:8001/`
+
+If `AGENT_API_KEY` is set, the live-agent dashboard sign-in requires that same key.
 
 ## Usage
 

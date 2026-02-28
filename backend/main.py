@@ -34,19 +34,38 @@ app = FastAPI(
     version="2.0.0",
 )
 
-origins = [
-    "http://localhost",
-    "http://localhost:8000",
-    "http://127.0.0.1:8080",
-    "http://0.0.0.0:8000",
-    "http://localhost:8001",
-    "http://127.0.0.1:8001",
-]
+
+def _parse_cors_origins() -> list[str]:
+    raw = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost,http://localhost:8000,http://127.0.0.1:8080,http://0.0.0.0:8000,http://localhost:8001,http://127.0.0.1:8001",
+    )
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+AGENT_API_KEY = os.getenv("AGENT_API_KEY", "").strip()
+origins = _parse_cors_origins()
+
+
+def _enforce_agent_api_key(request: Request = None, websocket: WebSocket = None):
+    """Require agent API key only when AGENT_API_KEY is configured."""
+    if not AGENT_API_KEY:
+        return
+
+    provided = ""
+    if request is not None:
+        provided = request.headers.get("x-agent-api-key", "").strip()
+        if provided != AGENT_API_KEY:
+            raise HTTPException(status_code=401, detail="Invalid agent API key")
+    elif websocket is not None:
+        provided = websocket.query_params.get("api_key", "").strip()
+        if provided != AGENT_API_KEY:
+            raise HTTPException(status_code=401, detail="Invalid agent API key")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for Squarespace embedding
-    allow_credentials=False,  # Must be False when allow_origins is "*"
+    allow_origins=origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -282,8 +301,9 @@ async def serve_agent_dashboard(request: Request):
 
 
 @app.post("/api/agent/login")
-async def agent_login(agent_id: str, name: str):
+async def agent_login(agent_id: str, name: str, request: Request):
     """Register/login an agent."""
+    _enforce_agent_api_key(request=request)
     agent = session_manager.register_agent(agent_id, name)
     return {
         "success": True,
@@ -296,8 +316,9 @@ async def agent_login(agent_id: str, name: str):
 
 
 @app.get("/api/agent/queue")
-async def get_waiting_queue():
+async def get_waiting_queue(request: Request):
     """Get list of customers waiting for an agent."""
+    _enforce_agent_api_key(request=request)
     waiting_sessions = session_manager.get_waiting_sessions()
     return {
         "queue": [
@@ -313,8 +334,9 @@ async def get_waiting_queue():
 
 
 @app.post("/api/agent/accept/{session_id}")
-async def accept_chat(session_id: str, agent_id: str):
+async def accept_chat(session_id: str, agent_id: str, request: Request):
     """Agent accepts a customer chat."""
+    _enforce_agent_api_key(request=request)
     success = session_manager.assign_agent(session_id, agent_id)
     
     if not success:
@@ -349,8 +371,9 @@ async def accept_chat(session_id: str, agent_id: str):
 
 
 @app.post("/api/agent/end/{session_id}")
-async def end_agent_session_endpoint(session_id: str, return_to_ai: bool = False):
+async def end_agent_session_endpoint(session_id: str, return_to_ai: bool = False, request: Request = None):
     """End an agent session."""
+    _enforce_agent_api_key(request=request)
     success = session_manager.end_agent_session(session_id, return_to_ai)
     
     if not success:
@@ -367,8 +390,9 @@ async def end_agent_session_endpoint(session_id: str, return_to_ai: bool = False
 
 
 @app.get("/api/agent/sessions/{agent_id}")
-async def get_agent_sessions(agent_id: str):
+async def get_agent_sessions(agent_id: str, request: Request):
     """Get all active sessions for an agent."""
+    _enforce_agent_api_key(request=request)
     sessions = session_manager.get_agent_sessions(agent_id)
     return {
         "sessions": [
@@ -386,6 +410,12 @@ async def get_agent_sessions(agent_id: str):
 @app.websocket("/ws/agent/{agent_id}")
 async def agent_websocket(websocket: WebSocket, agent_id: str):
     """WebSocket endpoint for agent real-time communication."""
+    try:
+        _enforce_agent_api_key(websocket=websocket)
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
+
     await connection_manager.connect_agent(agent_id, websocket)
     
     try:
