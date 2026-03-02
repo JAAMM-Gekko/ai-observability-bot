@@ -1,8 +1,6 @@
 version: '3.8'
 
 services:
-  # Main application
-  # Note: Splunk OTEL Collector runs on separate testserver, not in this container
   ai-observability-bot:
     build: .
     container_name: ai-observability-bot
@@ -13,14 +11,21 @@ services:
     networks:
       - observability-net
     volumes:
-      - ./my_chroma_db:/app/my_chroma_db
+      # Persist ChromaDB data between container restarts.
+      # Path must match CHROMA_PERSIST_PATH in backend/agent.py → /app/amelia_chroma_db
+      - ./amelia_chroma_db:/app/amelia_chroma_db
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s   # give the RAG system time to initialize on first boot
+
 networks:
+  # Created automatically if it doesn't exist yet.
+  # The OTEL collector container (started separately) should be attached to
+  # this same network so that OTEL_ENDPOINT=http://otel-collector:4328 resolves.
+  # To attach an existing collector: docker network connect observability-net <collector-container-name>
   observability-net:
-    external: true
+    driver: bridge

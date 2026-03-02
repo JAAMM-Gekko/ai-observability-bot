@@ -1,18 +1,21 @@
 fastapi
-uvicorn[standard] # For running the FastAPI server
-python-dotenv     # For loading .env files
-jinja2            # If you want to serve HTML templates directly from FastAPI (optional, but good to know)
-beeai-framework 
+uvicorn[standard]
+python-dotenv
+jinja2
+beeai-framework
 chromadb
 pandas
 sentence-transformers
 openpyxl
 
-# OpenTelemetry packages (lightweight, no dependency conflicts)
+# OpenTelemetry
 opentelemetry-api
 opentelemetry-sdk
 opentelemetry-exporter-otlp-proto-http
-dotenv
 
-# For sentiment analysis and email functionality
+# AI / LLM
 openai>=1.0.0
+
+# Optional observability packages — both are wrapped in try/except in agent.py and main.py,
+# so the app starts fine without them. Install manually if your platform supports it:
+#   pip install openlit openinference-instrumentation-beeai

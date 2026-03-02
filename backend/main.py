@@ -25,6 +25,13 @@ except ImportError:
     BeeAIInstrumentor = None
 
 from agent import run_faq_agent, _setup_rag_system
+from sentiment_analyzer import SentimentAnalyzer, ConversationTracker, generate_conversation_summary
+from email_service import EmailService
+
+# Initialize sentiment analysis and email service (singletons shared across requests)
+_sentiment_analyzer = SentimentAnalyzer(frustration_threshold=0.6)
+_conversation_tracker = ConversationTracker(frustration_threshold=0.6, trigger_count=3)
+_email_service = EmailService()
 
 load_dotenv()
 
@@ -125,20 +132,29 @@ async def chat_endpoint(request_body: ChatRequest):
     Detects handoff keywords and manages session state.
     """
     user_query = request_body.query
-    session_id = request_body.session_id
-    
+    # tracker_session_id always stays equal to what the frontend sent (or the first-time UUID).
+    # This keeps the frustrated_count accumulation stable even if the live-agent session_manager
+    # loses state (e.g. after a container restart) and has to create a new internal session.
+    frontend_session_id = request_body.session_id
+
     print(f"Received query: {user_query}")
-    
-    # Create or get session
-    if not session_id:
+
+    # Create or get session for live-agent state tracking
+    if not frontend_session_id:
         session_id = session_manager.create_session()
         print(f"Created new session: {session_id}")
     else:
-        # Check if session exists, if not create a new one
-        session = session_manager.get_session(session_id)
-        if not session:
-            print(f"Session {session_id} not found, creating new session")
+        session = session_manager.get_session(frontend_session_id)
+        if session:
+            session_id = frontend_session_id
+        else:
+            # session_manager lost state (restart); create a new live-agent session
+            # but keep the original id for the sentiment tracker below
+            print(f"Session {frontend_session_id} not found in session_manager, creating new live-agent session")
             session_id = session_manager.create_session()
+
+    # tracker always uses the id the frontend knows about so frustrated_count is stable
+    tracker_session_id = frontend_session_id or session_id
     
     session = session_manager.get_session(session_id)
     if not session:
@@ -198,12 +214,35 @@ async def chat_endpoint(request_body: ChatRequest):
     # Process with AI agent
     try:
         agent_answer = await run_faq_agent(user_query)
-        
+
         session_manager.add_message(session_id, ChatMessage(
             sender="agent",
             content=agent_answer
         ))
-        
+
+        # --- Sentiment analysis & escalation ---
+        try:
+            sentiment_score = await _sentiment_analyzer.analyze_sentiment(user_query)
+            tracking_result = _conversation_tracker.track_message(
+                tracker_session_id, user_query, agent_answer, sentiment_score
+            )
+            print(
+                f"[Sentiment] session={tracker_session_id} score={sentiment_score:.2f} "
+                f"frustrated_count={tracking_result['frustrated_count']}"
+            )
+
+            if tracking_result["should_escalate"]:
+                print(f"[Escalation] Triggering escalation for session {tracker_session_id}")
+                history = _conversation_tracker.get_conversation_history(tracker_session_id)
+                summary = await generate_conversation_summary(history)
+                email_sent = _email_service.send_escalation_email(summary, session_id)
+                if not email_sent:
+                    print(f"[Escalation] Email failed for session {session_id} — see above for details")
+        except Exception as sentiment_err:
+            # Sentiment errors must never break the chat response
+            print(f"[Sentiment] Error (non-fatal): {sentiment_err}")
+        # --- end sentiment ---
+
         return ChatResponse(
             answer=agent_answer,
             session_id=session_id,
