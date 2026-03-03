@@ -169,31 +169,54 @@ async def chat_endpoint(request_body: ChatRequest):
     # Check if customer wants to talk to a live agent
     if session_manager.detect_handoff_request(user_query):
         print(f"Handoff request detected for session {session_id}")
+
+        # Check how many agents are currently connected via WebSocket
+        online_count = session_manager.get_online_agent_count(
+            set(connection_manager.agent_connections.keys())
+        )
+
+        if online_count == 0:
+            # No agents online — stay in AI mode, don't enter waiting queue
+            no_agent_msg = (
+                "There's currently no live agent available. "
+                "Please try again later or continue chatting with me — I'm happy to help!"
+            )
+            session_manager.add_message(session_id, ChatMessage(
+                sender="system",
+                content=no_agent_msg
+            ))
+            return ChatResponse(
+                answer=no_agent_msg,
+                session_id=session_id,
+                state=SessionState.AI
+            )
+
         session_manager.request_handoff(session_id)
-        
+
         # Notify all connected agents about new customer in queue
         await connection_manager.broadcast_to_all_agents({
             "type": "new_customer",
             "session_id": session_id,
             "message": "New customer waiting in queue"
         })
-        
+
         response_text = (
             "I'll connect you with a live agent right away. "
-            "Please wait a moment while I find someone to help you..."
+            "Please wait a moment while I find someone to help you... "
+            "Type 'cancel' at any time to go back to the AI assistant."
         )
-        
+
         session_manager.add_message(session_id, ChatMessage(
             sender="system",
             content=response_text
         ))
-        
+
         return ChatResponse(
             answer=response_text,
             session_id=session_id,
             state=SessionState.WAITING_FOR_AGENT
         )
-    
+
     # If session is in live agent mode, don't process with AI
     if session.state == SessionState.LIVE_AGENT:
         return ChatResponse(
@@ -202,11 +225,30 @@ async def chat_endpoint(request_body: ChatRequest):
             state=session.state,
             agent_name=session.agent_name
         )
-    
-    # If session is waiting for agent, remind them
+
+    # If session is waiting for agent, allow cancel or remind them
     if session.state == SessionState.WAITING_FOR_AGENT:
+        if session_manager.detect_cancel_request(user_query):
+            session_manager.cancel_handoff(session_id)
+            cancel_msg = (
+                "No problem! I've cancelled the live agent request. "
+                "I'm here to help — what would you like to know?"
+            )
+            session_manager.add_message(session_id, ChatMessage(
+                sender="system",
+                content=cancel_msg
+            ))
+            return ChatResponse(
+                answer=cancel_msg,
+                session_id=session_id,
+                state=SessionState.AI
+            )
+
         return ChatResponse(
-            answer="Please wait, we're connecting you with a live agent...",
+            answer=(
+                "Still looking for an available agent, please hang tight... "
+                "Type 'cancel' if you'd like to go back to the AI assistant."
+            ),
             session_id=session_id,
             state=session.state
         )

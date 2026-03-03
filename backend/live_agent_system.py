@@ -21,6 +21,19 @@ HANDOFF_KEYWORDS = [
     "customer support",
 ]
 
+# Keywords that cancel a pending handoff and return to AI mode
+CANCEL_KEYWORDS = [
+    "cancel",
+    "nevermind",
+    "never mind",
+    "go back",
+    "back to ai",
+    "cancel wait",
+    "cancel request",
+    "stop waiting",
+    "forget it",
+]
+
 
 class SessionManager:
     """Manages chat sessions and agent assignments."""
@@ -56,6 +69,34 @@ class SessionManager:
         """Check if text contains handoff keywords."""
         text_lower = text.lower()
         return any(keyword in text_lower for keyword in HANDOFF_KEYWORDS)
+
+    def detect_cancel_request(self, text: str) -> bool:
+        """Check if text contains keywords to cancel a pending handoff."""
+        text_lower = text.lower()
+        return any(keyword in text_lower for keyword in CANCEL_KEYWORDS)
+
+    def get_online_agent_count(self, connected_agent_ids: set) -> int:
+        """Return how many registered agents are currently connected via WebSocket."""
+        return sum(
+            1 for agent_id in self.agents
+            if agent_id in connected_agent_ids and self.agents[agent_id].is_available
+        )
+
+    def cancel_handoff(self, session_id: str) -> bool:
+        """Cancel a pending handoff and return the session to AI mode."""
+        session = self.get_session(session_id)
+        if not session or session.state != SessionState.WAITING_FOR_AGENT:
+            return False
+
+        session.state = SessionState.AI
+        if session_id in self.waiting_queue:
+            self.waiting_queue.remove(session_id)
+
+        self.add_message(session_id, ChatMessage(
+            sender="system",
+            content="Live agent request cancelled. Returning to AI assistant."
+        ))
+        return True
     
     def request_handoff(self, session_id: str) -> bool:
         """Request handoff to live agent."""
