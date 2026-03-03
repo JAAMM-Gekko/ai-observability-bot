@@ -25,6 +25,13 @@ except ImportError:
     BeeAIInstrumentor = None
 
 from agent import run_faq_agent, _setup_rag_system
+from sentiment_analyzer import SentimentAnalyzer, ConversationTracker, generate_conversation_summary
+from email_service import EmailService
+
+# Initialize sentiment analysis and email service (singletons shared across requests)
+_sentiment_analyzer = SentimentAnalyzer(frustration_threshold=0.6)
+_conversation_tracker = ConversationTracker(frustration_threshold=0.6, trigger_count=3)
+_email_service = EmailService()
 
 load_dotenv()
 
@@ -144,20 +151,29 @@ async def chat_endpoint(request_body: ChatRequest):
     Detects handoff keywords and manages session state.
     """
     user_query = request_body.query
-    session_id = request_body.session_id
-    
+    # tracker_session_id always stays equal to what the frontend sent (or the first-time UUID).
+    # This keeps the frustrated_count accumulation stable even if the live-agent session_manager
+    # loses state (e.g. after a container restart) and has to create a new internal session.
+    frontend_session_id = request_body.session_id
+
     print(f"Received query: {user_query}")
-    
-    # Create or get session
-    if not session_id:
+
+    # Create or get session for live-agent state tracking
+    if not frontend_session_id:
         session_id = session_manager.create_session()
         print(f"Created new session: {session_id}")
     else:
-        # Check if session exists, if not create a new one
-        session = session_manager.get_session(session_id)
-        if not session:
-            print(f"Session {session_id} not found, creating new session")
+        session = session_manager.get_session(frontend_session_id)
+        if session:
+            session_id = frontend_session_id
+        else:
+            # session_manager lost state (restart); create a new live-agent session
+            # but keep the original id for the sentiment tracker below
+            print(f"Session {frontend_session_id} not found in session_manager, creating new live-agent session")
             session_id = session_manager.create_session()
+
+    # tracker always uses the id the frontend knows about so frustrated_count is stable
+    tracker_session_id = frontend_session_id or session_id
     
     session = session_manager.get_session(session_id)
     if not session:
@@ -172,31 +188,54 @@ async def chat_endpoint(request_body: ChatRequest):
     # Check if customer wants to talk to a live agent
     if session_manager.detect_handoff_request(user_query):
         print(f"Handoff request detected for session {session_id}")
+
+        # Check how many agents are currently connected via WebSocket
+        online_count = session_manager.get_online_agent_count(
+            set(connection_manager.agent_connections.keys())
+        )
+
+        if online_count == 0:
+            # No agents online — stay in AI mode, don't enter waiting queue
+            no_agent_msg = (
+                "There's currently no live agent available. "
+                "Please try again later or continue chatting with me — I'm happy to help!"
+            )
+            session_manager.add_message(session_id, ChatMessage(
+                sender="system",
+                content=no_agent_msg
+            ))
+            return ChatResponse(
+                answer=no_agent_msg,
+                session_id=session_id,
+                state=SessionState.AI
+            )
+
         session_manager.request_handoff(session_id)
-        
+
         # Notify all connected agents about new customer in queue
         await connection_manager.broadcast_to_all_agents({
             "type": "new_customer",
             "session_id": session_id,
             "message": "New customer waiting in queue"
         })
-        
+
         response_text = (
             "I'll connect you with a live agent right away. "
-            "Please wait a moment while I find someone to help you..."
+            "Please wait a moment while I find someone to help you... "
+            "Type 'cancel' at any time to go back to the AI assistant."
         )
-        
+
         session_manager.add_message(session_id, ChatMessage(
             sender="system",
             content=response_text
         ))
-        
+
         return ChatResponse(
             answer=response_text,
             session_id=session_id,
             state=SessionState.WAITING_FOR_AGENT
         )
-    
+
     # If session is in live agent mode, don't process with AI
     if session.state == SessionState.LIVE_AGENT:
         return ChatResponse(
@@ -205,11 +244,30 @@ async def chat_endpoint(request_body: ChatRequest):
             state=session.state,
             agent_name=session.agent_name
         )
-    
-    # If session is waiting for agent, remind them
+
+    # If session is waiting for agent, allow cancel or remind them
     if session.state == SessionState.WAITING_FOR_AGENT:
+        if session_manager.detect_cancel_request(user_query):
+            session_manager.cancel_handoff(session_id)
+            cancel_msg = (
+                "No problem! I've cancelled the live agent request. "
+                "I'm here to help — what would you like to know?"
+            )
+            session_manager.add_message(session_id, ChatMessage(
+                sender="system",
+                content=cancel_msg
+            ))
+            return ChatResponse(
+                answer=cancel_msg,
+                session_id=session_id,
+                state=SessionState.AI
+            )
+
         return ChatResponse(
-            answer="Please wait, we're connecting you with a live agent...",
+            answer=(
+                "Still looking for an available agent, please hang tight... "
+                "Type 'cancel' if you'd like to go back to the AI assistant."
+            ),
             session_id=session_id,
             state=session.state
         )
@@ -217,12 +275,35 @@ async def chat_endpoint(request_body: ChatRequest):
     # Process with AI agent
     try:
         agent_answer = await run_faq_agent(user_query)
-        
+
         session_manager.add_message(session_id, ChatMessage(
             sender="agent",
             content=agent_answer
         ))
-        
+
+        # --- Sentiment analysis & escalation ---
+        try:
+            sentiment_score = await _sentiment_analyzer.analyze_sentiment(user_query)
+            tracking_result = _conversation_tracker.track_message(
+                tracker_session_id, user_query, agent_answer, sentiment_score
+            )
+            print(
+                f"[Sentiment] session={tracker_session_id} score={sentiment_score:.2f} "
+                f"frustrated_count={tracking_result['frustrated_count']}"
+            )
+
+            if tracking_result["should_escalate"]:
+                print(f"[Escalation] Triggering escalation for session {tracker_session_id}")
+                history = _conversation_tracker.get_conversation_history(tracker_session_id)
+                summary = await generate_conversation_summary(history)
+                email_sent = _email_service.send_escalation_email(summary, session_id)
+                if not email_sent:
+                    print(f"[Escalation] Email failed for session {session_id} — see above for details")
+        except Exception as sentiment_err:
+            # Sentiment errors must never break the chat response
+            print(f"[Sentiment] Error (non-fatal): {sentiment_err}")
+        # --- end sentiment ---
+
         return ChatResponse(
             answer=agent_answer,
             session_id=session_id,
