@@ -1,12 +1,18 @@
 # backend/agent.py
-# This file implements a RAG (Retrieval-Augmented Generation) system for company FAQs
-# using the BeeAI framework, ChromaDB for vector storage, and OpenAI for LLM responses.
+# Changes:
+# - Load SKILL.md from skills/cannabis-medical-safety/SKILL.md
+# - Create a separate "MedicalSafetyAgent" workflow that only runs when a user asks
+#   medical/health/dosage/interaction questions (so the skill tokens are only used when needed)
+# - Keep the retail/FAQ agent focused on compliant retail/FAQ guidance
 
 import asyncio
 import os
 import time
+import re
+
 # Disable tokenizer parallelism to avoid warnings and potential conflicts
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 from typing import List
 from dotenv import load_dotenv
 load_dotenv()
@@ -87,9 +93,9 @@ def patched_create(*args, **kwargs):
         # Module-level tracer was created at import time with no-op provider, so spans
         # would never export; get tracer at request time so Splunk receives llm.prompt/llm.response.
         if OTEL_AVAILABLE:
-             try:
-                 current_tracer = trace.get_tracer(SERVICE_NAME)
-                 with current_tracer.start_as_current_span("openai_sidecar_intercept") as span:
+            try:
+                current_tracer = trace.get_tracer(SERVICE_NAME)
+                with current_tracer.start_as_current_span("openai_sidecar_intercept") as span:
                     span.set_attribute("service.name", SERVICE_NAME)
                     span.set_attribute("llm.prompt", prompt)
                     span.set_attribute("llm.response", text)
@@ -119,7 +125,7 @@ def patched_create(*args, **kwargs):
 
                     trace.get_tracer_provider().force_flush(timeout_millis=2000)
                     print("test4: span flushed")
-             except Exception as e:
+            except Exception as e:
                 print(f"Tracing failed: {e}")
         return response
 
@@ -141,21 +147,123 @@ import chromadb
 
 # Configuration constants for the RAG system
 EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'
-# Use absolute path for Docker compatibility; this must match the path used by
-# backend/extraction.py (CHROMA_PERSIST_PATH → amelia_chroma_db) and the
-# docker-compose volume mapping ./amelia_chroma_db:/app/amelia_chroma_db,
-# otherwise the agent will point at an empty vector database.
 CHROMA_PERSIST_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "amelia_chroma_db")
 CHROMA_COLLECTION_NAME = "company_faqs"
+
+# === Skill path ===
+# backend/agent.py is in backend/, so skills/ is sibling of backend/
+SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
+CANNABIS_MEDICAL_SKILL_PATH = os.path.join(SKILLS_DIR, "cannabis-medical-safety", "SKILL.md")
 
 # Global variables
 _embedding_model = None
 _chroma_collection = None
 _llm = None
 _faq_tool_instance = None
-_agent_workflow = None
+
+_agent_workflow = None                 # retail/FAQ workflow
+_medical_agent_workflow = None         # medical safety workflow (skill-based)
+
 _tracer_provider = None
 _tracer = None
+
+# Cached skill instructions (loaded once)
+_medical_skill_instructions = None
+
+
+def _load_skill_instructions(skill_path: str) -> str:
+    """Load a SKILL.md file (manifest/instructions) from disk."""
+    try:
+        with open(skill_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        # Fail safe: if skill missing, return a minimal safe policy.
+        # (So production doesn't crash if the file isn't mounted in Docker.)
+        return (
+            "---\n"
+            "name: cannabis-medical-safety\n"
+            "description: Safety fallback skill; file missing.\n"
+            "---\n\n"
+            "# Cannabis Medical Information Skill (Fallback)\n"
+            "If a user asks for medical advice, respond with a disclaimer and advise consulting a licensed clinician.\n"
+            "Do not provide dosage numbers or medical claims.\n"
+        )
+    except Exception as e:
+        return (
+            "---\n"
+            "name: cannabis-medical-safety\n"
+            "description: Safety fallback skill; file unreadable.\n"
+            "---\n\n"
+            f"# Error loading skill: {type(e).__name__}\n"
+            "Respond with a disclaimer and recommend consulting a licensed clinician.\n"
+            "Do not provide dosage numbers or medical claims.\n"
+        )
+
+def _normalize(text: str) -> str:
+    """Make matching easier (hyphens/spaces/etc.)."""
+    t = (text or "").lower()
+    t = t.replace("-", " ")               # self-harm -> self harm
+    t = re.sub(r"\s+", " ", t).strip()    # collapse extra spaces
+    return t
+
+ESCALATION_TERMS = [
+    # Pregnancy / breastfeeding
+    "pregnant", "pregnancy", "expecting", "trimester", "preggo",
+    "breastfeeding", "breast feeding", "nursing", "lactating",
+
+    # Chest pain / heart danger
+    "chest pain", "heart attack", "tightness in chest", "pressure in chest",
+    "palpitations", "heart racing",
+
+    # Seizures
+    "seizure", "seizures", "convulsion", "convulsions",
+
+    # Self-harm / suicide
+    "suicidal", "self harm", "harm myself", "kill myself", "want to die", "end my life",
+
+    # Pediatric
+    "pediatric", "child", "kid", "teen", "minor", "under 18", "my son", "my daughter",
+]
+
+def _is_medical_skill_query(user_query: str) -> bool:
+    """
+    Router: if query is about health conditions, dosage, symptoms, interactions, sleep/anxiety/pain, etc.,
+    route to the medical safety skill workflow.
+    """
+    q = _normalize(user_query)
+
+    # 1) Always route if any escalation term appears
+    if any(term in q for term in ESCALATION_TERMS):
+        return True
+
+    strong_terms = [
+        "dose", "dosage", "mg", "milligram", "titrate", "safe amount", "how much",
+        "interact", "interaction", "contraindication", "cyp", "cyp450", "grapefruit",
+        "side effect", "adverse", "overdose", "withdrawal",
+        "seizure", "epilepsy",
+        "chest pain", "heart attack",
+        "blood pressure", "hypertension", "ssri", "warfarin", "blood thinner",
+        "doctor", "pharmacist", "medication", "prescription",
+        "diagnose", "diagnosis", "treat", "cure",
+    ]
+
+    health_topics = [
+        "sleep", "insomnia", "anxiety", "panic", "pain", "inflammation", "nausea", "ptsd", "depression",
+        "arthritis", "cancer", "migraine", "adhd",
+    ]
+
+    # "strain for X" tends to be medical-ish if X is a health topic
+    if "strain" in q and any(t in q for t in health_topics):
+        return True
+
+    if any(t in q for t in strong_terms):
+        return True
+
+    if ("help" in q or "for my" in q or "for" in q) and any(t in q for t in health_topics):
+        return True
+
+    return False
+
 
 def setup_splunk_otel():
     if not OTEL_AVAILABLE:
@@ -163,7 +271,6 @@ def setup_splunk_otel():
         return None
 
     try:
-        # Use module-level OTEL_ENDPOINT (from env); OTLP HTTP exporter expects full path
         base = os.getenv("OTEL_ENDPOINT", "http://localhost:4328").rstrip("/")
         otel_traces_url = base if base.endswith("/v1/traces") else f"{base}/v1/traces"
         svc_name = os.getenv("OTEL_SERVICE_NAME", "beeai-faq-agent")
@@ -200,6 +307,7 @@ def setup_splunk_otel():
         print("Check your OTEL endpoint and configuration")
         return None
 
+
 def test_span_export(tracer_provider, endpoint: str):
     try:
         print(f"Testing span export to {endpoint}...")
@@ -210,7 +318,6 @@ def test_span_export(tracer_provider, endpoint: str):
             span.set_attribute("test.timestamp", time.time())
             span.set_attribute("test.service", "beeai-faq-agent")
 
-        # Use short timeout to avoid blocking 30s when OTEL collector is unreachable (e.g. in Docker)
         tracer_provider.force_flush(timeout_millis=3000)
 
         print("Span export test completed successfully")
@@ -222,10 +329,16 @@ def test_span_export(tracer_provider, endpoint: str):
         print("Check your OTEL endpoint connectivity")
         return False
 
-def _setup_rag_system():
-    global _embedding_model, _chroma_collection, _llm, _faq_tool_instance, _agent_workflow, _tracer_provider, _tracer
 
-    if _embedding_model and _chroma_collection and _llm and _faq_tool_instance and _agent_workflow:
+def _setup_rag_system():
+    global _embedding_model, _chroma_collection, _llm, _faq_tool_instance
+    global _agent_workflow, _medical_agent_workflow
+    global _tracer_provider, _tracer
+    global _medical_skill_instructions
+
+    # Note: we now have TWO workflows; both must exist to say "already setup".
+    if (_embedding_model and _chroma_collection and _llm and _faq_tool_instance and
+        _agent_workflow and _medical_agent_workflow and _medical_skill_instructions):
         print("RAG system already set up.")
         return True
 
@@ -236,13 +349,10 @@ def _setup_rag_system():
             _tracer_provider = setup_splunk_otel()
             if _tracer_provider:
                 _tracer = trace.get_tracer("beeai-faq-agent")
-                # So monkeypatch and any other code use the Splunk-backed provider
                 global tracer
                 tracer = trace.get_tracer(SERVICE_NAME)
                 print("OpenTelemetry tracer initialized for observability")
 
-                # Skip span export test during setup - it can block 30s if OTEL collector unreachable (e.g. Docker).
-                # Traces will still export; test is optional. Set OTEL_SKIP_SPAN_TEST=0 to run it.
                 if os.getenv("OTEL_SKIP_SPAN_TEST", "1") != "0":
                     print("Skipping span export test (set OTEL_SKIP_SPAN_TEST=0 to enable)")
                 else:
@@ -260,6 +370,13 @@ def _setup_rag_system():
     else:
         print("OpenTelemetry not available - running without observability")
 
+    # Load skill text once (keeps it out of base prompt unless used)
+    _medical_skill_instructions = _load_skill_instructions(CANNABIS_MEDICAL_SKILL_PATH)
+    if os.path.exists(CANNABIS_MEDICAL_SKILL_PATH):
+        print(f"Loaded medical skill from {CANNABIS_MEDICAL_SKILL_PATH}")
+    else:
+        print(f"Medical skill file not found at {CANNABIS_MEDICAL_SKILL_PATH} - using fallback skill text")
+
     try:
         _embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
         print("Embedding model loaded.")
@@ -271,6 +388,9 @@ def _setup_rag_system():
         chroma_client = chromadb.PersistentClient(path=CHROMA_PERSIST_PATH)
         _chroma_collection = chroma_client.get_or_create_collection(name=CHROMA_COLLECTION_NAME)
         print(f"ChromaDB collection '{CHROMA_COLLECTION_NAME}' ready with {_chroma_collection.count()} documents.")
+        print("CHROMA_PERSIST_PATH =", CHROMA_PERSIST_PATH)
+        print("CHROMA_COLLECTION_NAME =", CHROMA_COLLECTION_NAME)
+        print("CHROMA_DOC_COUNT =", _chroma_collection.count())
     except Exception as e:
         print(f"Error connecting to ChromaDB: {e}")
         return False
@@ -285,6 +405,7 @@ def _setup_rag_system():
     _faq_tool_instance = FAQTool(embedding_model=_embedding_model, chroma_collection=_chroma_collection)
     print("FAQTool instance created.")
 
+    # --- Retail/FAQ workflow (kept lean; no long “ban list” needed if we route medical queries away) ---
     _agent_workflow = AgentWorkflow(name="Company FAQ Assistant")
     _agent_workflow.add_agent(
         name="FAQAgent",
@@ -293,22 +414,44 @@ def _setup_rag_system():
             "You are a Washington State cannabis retail compliance assistant with a fun budtender vibe. "
             "Your primary goal is to answer using only the provided FAQ context. "
             "If no relevant FAQ context is provided, say you cannot find it in the store FAQs. "
-            "Do NOT provide medical advice, health claims, therapeutic claims, disease references, or dosage recommendations for medical outcomes. "
-            "Never state or imply that cannabis treats, cures, prevents, relieves, alleviates, or reduces symptoms of any condition. "
-            "Do NOT use or generate these terms: sleep, insomnia, pain, pain relief, anxiety, anxiety relief, stress relief, depression, PTSD, inflammation, nausea, seizures, arthritis, cancer, medical, medicinal, therapy, therapeutic, treat, cure, prevent, relieve, alleviate, reduce symptoms, anti-inflammatory. "
-            "Allowed content: flavor/aroma descriptions, factual cannabinoid and terpene information, potency details, consumption methods, and neutral consumer-reported experiences (example: customers often describe this as uplifting). "
-            "If asked about prohibited medical or condition topics, redirect to compliant product characteristics and suggest consulting a licensed healthcare professional. "
-            "Do NOT try to use the 'faq_lookup_tool' on your own if context is already provided, as information has already been retrieved for you."
+
+            "Do NOT provide medical advice, dosing advice, or therapeutic health claims. "
+            "Never state that cannabis treats, cures, prevents, or alleviates medical conditions. "
+
+            "Allowed content includes flavor/aroma descriptions, factual cannabinoid and terpene information, "
+            "potency details, consumption methods, and neutral consumer-reported experiences "
+            "(example: customers often describe this as uplifting or relaxing). "
+
+            "If a user asks a health or medical question, those questions are handled by a separate "
+            "medical safety skill, so do not answer them here."
+
+            "Do NOT try to use the 'faq_lookup_tool' on your own if context is already provided."
         ),
         tools=[_faq_tool_instance],
         llm=_llm,
     )
-    print("Agent workflow created and agent added.")
+
+    # --- Medical safety workflow (skill-based; only invoked on medical-ish queries) ---
+    _medical_agent_workflow = AgentWorkflow(name="Cannabis Medical Safety")
+    _medical_agent_workflow.add_agent(
+        name="MedicalSafetyAgent",
+        role="A cannabis medical information safety specialist.",
+        instructions=_medical_skill_instructions,
+        tools=[],   # intentionally no tools here; your SKILL.md already says no numeric dosing unless retrieved.
+        llm=_llm,
+    )
+
+    print("Agent workflows created: FAQAgent + MedicalSafetyAgent (skill-based).")
     return True
+
 
 class FAQTool(Tool):
     name: str = "faq_lookup_tool"
-    description: str = "Searches the company's frequently asked questions for relevant answers using semantic search. Use this tool when the user asks a question about company policies, products, or general FAQs. Input should be a question string."
+    description: str = (
+        "Searches the company's frequently asked questions for relevant answers using semantic search. "
+        "Use this tool when the user asks a question about company policies, products, or general FAQs. "
+        "Input should be a question string."
+    )
 
     class FAQToolInput(BaseModel):
         query: str = Field(description="The question to lookup in the company FAQs.")
@@ -352,7 +495,10 @@ class FAQTool(Tool):
                             include=['documents', 'metadatas']
                         )
 
-                        search_span.set_attribute("chroma.results_count", len(results.get('documents', [[]])[0]) if results and results.get('documents') else 0)
+                        search_span.set_attribute(
+                            "chroma.results_count",
+                            len(results.get('documents', [[]])[0]) if results and results.get('documents') else 0
+                        )
                         search_span.set_attribute("chroma.search_success", True)
 
                     with _tracer.start_as_current_span("result_processing") as process_span:
@@ -415,7 +561,13 @@ class FAQTool(Tool):
             except Exception as e:
                 return f"Error processing query for FAQ lookup: {e}"
 
+
 async def run_faq_agent(user_query: str) -> str:
+    """
+    Main entrypoint.
+    - If query is medical/health/dosage/interaction related, route to MedicalSafetyAgent (skill-based).
+    - Otherwise run retail FAQ RAG + FAQAgent.
+    """
     if _tracer:
         with _tracer.start_as_current_span("faq_agent_workflow") as span:
             span.set_attribute("workflow.name", "Company FAQ Assistant")
@@ -431,6 +583,36 @@ async def run_faq_agent(user_query: str) -> str:
                         return "Backend RAG system failed to initialize. Please check server logs."
                     setup_span.set_attribute("setup.status", "success")
 
+                # === Skill routing ===
+                use_medical_skill = _is_medical_skill_query(user_query)
+                span.set_attribute("routing.medical_skill", use_medical_skill)
+
+                if use_medical_skill:
+                    # No FAQ retrieval; directly answer using skill constraints
+                    with _tracer.start_as_current_span("medical_skill_execution") as med_span:
+                        med_span.set_attribute("agent.name", "MedicalSafetyAgent")
+
+                        response = await _medical_agent_workflow.run(
+                            inputs=[AgentWorkflowInput(prompt=user_query)]
+                        )
+
+                        final_answer = response.result.final_answer
+                        med_span.set_attribute("workflow.response_length", len(final_answer))
+                        med_span.set_attribute("workflow.success", True)
+
+                        # Useful for SIEM searches
+                        max_len = int(os.getenv("OTEL_TEXT_MAX_LEN", "4096"))
+                        if max_len > 0:
+                            prompt_attr = user_query if len(user_query) <= max_len else (user_query[:max_len] + "…")
+                            answer_attr = final_answer if len(final_answer) <= max_len else (final_answer[:max_len] + "…")
+                            span.set_attribute("llm.prompt", prompt_attr)
+                            span.set_attribute("llm.response", answer_attr)
+                            span.set_attribute("llm.response_length", len(final_answer))
+
+                        span.set_attribute("workflow.status", "success")
+                        return final_answer
+
+                # === Retail FAQ path ===
                 print("Calling the faq_lookup_tool...")
                 with _tracer.start_as_current_span("faq_tool_execution") as tool_span:
                     tool_span.set_attribute("tool.name", "faq_lookup_tool")
@@ -447,14 +629,10 @@ async def run_faq_agent(user_query: str) -> str:
 
                 with _tracer.start_as_current_span("agent_workflow_execution") as workflow_span:
                     workflow_span.set_attribute("workflow.agent_name", "FAQAgent")
-                    workflow_span.set_attribute("workflow.llm_model", "openai:gpt-4o")
+                    workflow_span.set_attribute("workflow.llm_model", os.environ.get("OPENAI_MODEL", "openai:gpt-4o"))
 
                     response = await _agent_workflow.run(
-                        inputs=[
-                            AgentWorkflowInput(
-                                prompt=prompt_for_agent,
-                            )
-                        ]
+                        inputs=[AgentWorkflowInput(prompt=prompt_for_agent)]
                     )
 
                     final_answer = response.result.final_answer
@@ -462,7 +640,6 @@ async def run_faq_agent(user_query: str) -> str:
                     workflow_span.set_attribute("workflow.success", True)
                     span.set_attribute("workflow.status", "success")
 
-                    # Capture end-user prompt/answer in a predictable place for Splunk searches.
                     max_len = int(os.getenv("OTEL_TEXT_MAX_LEN", "4096"))
                     if max_len > 0:
                         prompt_attr = user_query if len(user_query) <= max_len else (user_query[:max_len] + "…")
@@ -480,27 +657,34 @@ async def run_faq_agent(user_query: str) -> str:
 
                 print(f"Error running agent workflow: {e}")
                 return f"An error occurred while processing your request: {e}"
-    else:
-        if not _setup_rag_system():
-            return "Backend RAG system failed to initialize. Please check server logs."
 
-        print("Calling the faq_lookup_tool...")
-        retrieved_info = await _faq_tool_instance._run(user_query)
+    # === No tracer path ===
+    if not _setup_rag_system():
+        return "Backend RAG system failed to initialize. Please check server logs."
 
-        prompt_for_agent = f"Retrieved Company FAQ Information:\n{retrieved_info}\n\nUser Question: {user_query}"
-
+    if _is_medical_skill_query(user_query):
         try:
-            response = await _agent_workflow.run(
-                inputs=[
-                    AgentWorkflowInput(
-                        prompt=prompt_for_agent,
-                    )
-                ]
+            response = await _medical_agent_workflow.run(
+                inputs=[AgentWorkflowInput(prompt=user_query)]
             )
             return response.result.final_answer
         except Exception as e:
-            print(f"Error running agent workflow: {e}")
+            print(f"Error running medical skill workflow: {e}")
             return f"An error occurred while processing your request: {e}"
+
+    print("Calling the faq_lookup_tool...")
+    retrieved_info = await _faq_tool_instance._run(user_query)
+    prompt_for_agent = f"Retrieved Company FAQ Information:\n{retrieved_info}\n\nUser Question: {user_query}"
+
+    try:
+        response = await _agent_workflow.run(
+            inputs=[AgentWorkflowInput(prompt=prompt_for_agent)]
+        )
+        return response.result.final_answer
+    except Exception as e:
+        print(f"Error running agent workflow: {e}")
+        return f"An error occurred while processing your request: {e}"
+
 
 def get_observability_data() -> dict:
     return {
@@ -509,7 +693,10 @@ def get_observability_data() -> dict:
             "chroma_collection_ready": _chroma_collection is not None,
             "llm_initialized": _llm is not None,
             "faq_tool_ready": _faq_tool_instance is not None,
-            "agent_workflow_ready": _agent_workflow is not None
+            "agent_workflow_ready": _agent_workflow is not None,
+            "medical_skill_workflow_ready": _medical_agent_workflow is not None,
+            "medical_skill_loaded": _medical_skill_instructions is not None,
+            "medical_skill_path": CANNABIS_MEDICAL_SKILL_PATH,
         },
         "opentelemetry": {
             "available": OTEL_AVAILABLE,
@@ -527,6 +714,7 @@ def get_observability_data() -> dict:
         },
         "status": "ready" if all([
             _embedding_model, _chroma_collection, _llm,
-            _faq_tool_instance, _agent_workflow
+            _faq_tool_instance, _agent_workflow, _medical_agent_workflow,
+            _medical_skill_instructions
         ]) else "initializing"
     }
