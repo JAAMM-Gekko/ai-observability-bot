@@ -16,6 +16,9 @@ opentelemetry-exporter-otlp-proto-http
 # AI / LLM
 openai>=1.0.0
 
+# Guardrails (NVIDIA NeMo Guardrails for policy enforcement)
+nemoguardrails
+
 # Optional observability packages — both are wrapped in try/except in agent.py and main.py,
 # so the app starts fine without them. Install manually if your platform supports it:
 #   pip install openlit openinference-instrumentation-beeai

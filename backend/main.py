@@ -28,6 +28,7 @@ except ImportError:
 from agent import run_faq_agent, _setup_rag_system
 from sentiment_analyzer import SentimentAnalyzer, ConversationTracker, generate_conversation_summary
 from email_service import EmailService
+from guardrails_nemo import enforce_medical_output_guardrails
 
 # Initialize sentiment analysis and email service (singletons shared across requests)
 _sentiment_analyzer = SentimentAnalyzer(frustration_threshold=0.6)
@@ -339,16 +340,22 @@ async def chat_endpoint(request_body: ChatRequest):
     try:
         agent_answer = await run_faq_agent(user_query)
 
+        # Apply NeMo Guardrails as a post-response safety layer to ensure that
+        # no cannabis-related medical advice or therapeutic claims are returned
+        # to the end user. If NeMo is not installed or its config fails to load,
+        # this call is effectively a no-op and the original answer is used.
+        safe_answer = await enforce_medical_output_guardrails(user_query, agent_answer)
+
         session_manager.add_message(session_id, ChatMessage(
             sender="agent",
-            content=agent_answer
+            content=safe_answer
         ))
 
         # --- Sentiment analysis & escalation ---
         try:
             sentiment_score = await _sentiment_analyzer.analyze_sentiment(user_query)
             tracking_result = _conversation_tracker.track_message(
-                tracker_session_id, user_query, agent_answer, sentiment_score
+                tracker_session_id, user_query, safe_answer, sentiment_score
             )
             print(
                 f"[Sentiment] session={tracker_session_id} score={sentiment_score:.2f} "
@@ -368,7 +375,7 @@ async def chat_endpoint(request_body: ChatRequest):
         # --- end sentiment ---
 
         return ChatResponse(
-            answer=agent_answer,
+            answer=safe_answer,
             session_id=session_id,
             state=session.state
         )
