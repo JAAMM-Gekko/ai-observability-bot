@@ -2,7 +2,7 @@
 
 This tracker maps the original roadmap to the current repository state.
 
-Last updated: 2026-03-05 (frontend pull sync)
+Last updated: 2026-03-05 (frontend + persona validation sync)
 
 Status legend:
 
@@ -26,9 +26,19 @@ Working, observable chatbot system that can be deployed and demoed quickly.
 - `[x]` Dockerfile + docker-compose setup present
 - `[x]` Frontend chat UI present
 - `[x]` Frontend landing/marketing page integrated into `frontend/index.html` with hero CTA opening the chatbot widget
+- `[x]` Frontend logo path fixed to match committed asset (`frontend/static/linkedin_logo.png`)
 - `[~]` Splunk + OTEL collector setup depends on external infra and env configuration
 - `[~]` Production hardening (secrets management, strict CORS, auth) remains incomplete
-- `[~]` Frontend static asset naming consistency needs a cleanup pass (`/static/linkedin logo.png` reference vs `frontend/static/linkedin_logo.png`)
+
+### Sponsor Requirement Tracking (Persona/Instruction Compliance)
+
+- `[x]` `backend/agent.py` persona updated to a fun budtender style with Washington compliance framing
+- `[x]` System instructions updated to block medical/therapeutic claims and treatment/cure/prevent language
+- `[x]` Prohibited term set added in prompt instructions (sleep, pain, anxiety, PTSD, etc.)
+- `[x]` Redirect behavior added for prohibited asks (fallback to flavor/terpenes/potency + suggest licensed healthcare professional)
+- `[x]` Initial manual validation passed: prohibited-topic prompts now return compliance-safe responses
+- `[~]` Ongoing validation still required with broader edge-case prompt sets
+- `[~]` Guardrail backup layer (post-response policy check) not yet implemented in code
 
 ## Phase 2 - SaaS Multi-Tenancy + Live Agent Escalation
 
