@@ -344,6 +344,16 @@ document.addEventListener('DOMContentLoaded', () => {
         userInput.focus();
     });
 
+    const heroChatCta = document.getElementById('hero-chat-cta');
+    if (heroChatCta) {
+        heroChatCta.addEventListener('click', (event) => {
+            event.preventDefault();
+            chatContainer.classList.remove('chat-container-closed');
+            chatContainer.classList.add('chat-container-open');
+            userInput.focus();
+        });
+    }
+
     closeButton.addEventListener('click', () => {
         chatContainer.classList.remove('chat-container-open');
         chatContainer.classList.add('chat-container-closed');

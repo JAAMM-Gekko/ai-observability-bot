@@ -191,6 +191,11 @@ async def serve_agent_dashboard(request: Request):
     """Serve the agent dashboard HTML page."""
     return templates.TemplateResponse("agent-dashboard.html", {"request": request})
 
+@app.get("/company-cite.html", response_class=HTMLResponse)
+async def serve_company_cite(request: Request):
+    """Serve the company website page (embedded in iframe on main page)."""
+    return templates.TemplateResponse("company-cite.html", {"request": request})
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request_body: ChatRequest):
     """

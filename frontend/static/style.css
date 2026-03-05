@@ -20,10 +20,20 @@ body {
     padding: 0;
 }
 
-/* Main Website Content */
+/* Main Website Content - embeds company-cite.html */
 .main-content {
-    padding: 50px;
-    text-align: center;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    min-height: 100vh;
+}
+
+.company-website-iframe {
+    display: block;
+    width: 100%;
+    min-height: 100vh;
+    border: none;
+    vertical-align: top;
 }
 
 /* Floating Widget Button */
