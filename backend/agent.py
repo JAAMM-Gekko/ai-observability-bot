@@ -259,7 +259,12 @@ def _is_medical_skill_query(user_query: str) -> bool:
     if any(t in q for t in strong_terms):
         return True
 
-    if ("help" in q or "for my" in q or "for" in q) and any(t in q for t in health_topics):
+    therapeutic_intent = [
+        "help", "helps", "good for", "treat", "treats", "relieve", "relieves",
+        "reduce", "reduces", "manage", "manages"
+    ]
+
+    if any(t in q for t in therapeutic_intent):
         return True
 
     return False
