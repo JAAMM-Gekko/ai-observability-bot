@@ -2,6 +2,8 @@
 
 This tracker maps the original roadmap to the current repository state.
 
+Last updated: 2026-03-05 (frontend pull sync)
+
 Status legend:
 
 - `[x]` done
@@ -19,11 +21,14 @@ Working, observable chatbot system that can be deployed and demoed quickly.
 - `[x]` FastAPI backend + chat API implemented
 - `[x]` BeeAI RAG pipeline implemented
 - `[x]` ChromaDB integration implemented
+- `[~]` Chroma storage path/documentation alignment is incomplete (`agent.py`/`extraction.py` use `amelia_chroma_db`, while README still references `my_chroma_db`)
 - `[x]` OpenLIT/OpenTelemetry instrumentation implemented (with graceful degradation)
 - `[x]` Dockerfile + docker-compose setup present
 - `[x]` Frontend chat UI present
+- `[x]` Frontend landing/marketing page integrated into `frontend/index.html` with hero CTA opening the chatbot widget
 - `[~]` Splunk + OTEL collector setup depends on external infra and env configuration
 - `[~]` Production hardening (secrets management, strict CORS, auth) remains incomplete
+- `[~]` Frontend static asset naming consistency needs a cleanup pass (`/static/linkedin logo.png` reference vs `frontend/static/linkedin_logo.png`)
 
 ## Phase 2 - SaaS Multi-Tenancy + Live Agent Escalation
 
@@ -36,7 +41,13 @@ Move from per-customer clone model to tenant-aware shared application architectu
 - `[x]` Session states and handoff workflow implemented
 - `[x]` Customer/agent WebSocket channels implemented
 - `[x]` Agent queue and acceptance flow implemented
+- `[~]` Timeout handling and user-facing wait/timeout messaging improved (recent update)
 - `[~]` Reliability hardening (durable queue, reconnect handling, failover) incomplete
+
+### Repo Hygiene / Security Hygiene (supporting work)
+
+- `[~]` Local vector DB artifacts are still tracked in git (`my_chroma_db`); cleanup/untracking and ignore rules are not complete
+- `[~]` Additional hardening still needed (tenant auth, RBAC, durable storage, full isolation tests, and DB artifact hygiene)
 
 ### Multi-Tenancy Core
 
