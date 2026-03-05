@@ -11,3 +11,4 @@ frontend/__pycache__/
 __pycache__/
 *.pyc
 Backup/
+amelia_chroma_db/

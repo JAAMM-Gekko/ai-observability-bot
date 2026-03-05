@@ -1,6 +1,15 @@
 version: '3.8'
 
 services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    volumes:
+      - /home/ubuntu/otel/otel-splunk-4-5.yaml:/etc/otelcol-contrib/config.yaml
+    networks:
+      - observability-net
+    restart: unless-stopped
+
   ai-observability-bot:
     build: .
     container_name: ai-observability-bot
@@ -11,21 +20,17 @@ services:
     networks:
       - observability-net
     volumes:
-      # Persist ChromaDB data between container restarts.
-      # Path must match CHROMA_PERSIST_PATH in backend/agent.py → /app/amelia_chroma_db
       - ./amelia_chroma_db:/app/amelia_chroma_db
     restart: unless-stopped
+    depends_on:
+      - otel-collector
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s   # give the RAG system time to initialize on first boot
+      start_period: 60s
 
 networks:
-  # Created automatically if it doesn't exist yet.
-  # The OTEL collector container (started separately) should be attached to
-  # this same network so that OTEL_ENDPOINT=http://otel-collector:4328 resolves.
-  # To attach an existing collector: docker network connect observability-net <collector-container-name>
   observability-net:
     driver: bridge
