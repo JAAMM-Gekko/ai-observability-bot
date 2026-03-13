@@ -227,44 +227,45 @@ ESCALATION_TERMS = [
 
 def _is_medical_skill_query(user_query: str) -> bool:
     """
-    Router: if query is about health conditions, dosage, symptoms, interactions, sleep/anxiety/pain, etc.,
-    route to the medical safety skill workflow.
+    Router: if query requires clinical guardrails (dosing, drug interactions,
+    escalation emergencies), route to medical safety skill workflow.
+    
+    General wellness/lifestyle queries (sleep, anxiety, relaxation) flow straight
+    to LLM to receive non-medical descriptive responses per sponsor guidelines.
     """
     q = _normalize(user_query)
 
-    # 1) Always route if any escalation term appears
+    # Gate 1 — hard escalation terms (defined externally, non-negotiable)
     if any(term in q for term in ESCALATION_TERMS):
         return True
 
-    strong_terms = [
-        "dose", "dosage", "mg", "milligram", "titrate", "safe amount", "how much",
-        "interact", "interaction", "contraindication", "cyp", "cyp450", "grapefruit",
-        "side effect", "adverse", "overdose", "withdrawal",
-        "seizure", "epilepsy",
-        "chest pain", "heart attack",
-        "blood pressure", "hypertension", "ssri", "warfarin", "blood thinner",
-        "doctor", "pharmacist", "medication", "prescription",
-        "diagnose", "diagnosis", "treat", "cure",
+    # Gate 2 — strictly clinical/dosing terms only
+    hard_clinical = [
+        "dose", "dosage", "mg", "milligram", "titrate",
+        "interaction", "contraindication", "cyp", "cyp450",
+        "overdose", "withdrawal", "seizure", "epilepsy",
+        "blood pressure", "hypertension", "ssri", "warfarin",
+        "blood thinner", "pharmacist", "prescription",
     ]
+    if any(t in q for t in hard_clinical):
+        return True
 
+    # Gate 3 — "strain for [health topic]" compound rule (narrow, intentional)
     health_topics = [
-        "sleep", "insomnia", "anxiety", "panic", "pain", "inflammation", "nausea", "ptsd", "depression",
+        "sleep", "insomnia", "anxiety", "panic", "pain",
+        "inflammation", "nausea", "ptsd", "depression",
         "arthritis", "cancer", "migraine", "adhd",
     ]
-
-    # "strain for X" tends to be medical-ish if X is a health topic
     if "strain" in q and any(t in q for t in health_topics):
         return True
 
-    if any(t in q for t in strong_terms):
-        return True
-
-    therapeutic_intent = [
-        "help", "helps", "good for", "treat", "treats", "relieve", "relieves",
-        "reduce", "reduces", "manage", "manages"
+    # Gate 4 — clinical sleep queries only (sponsor flagged "sleep" as missing)
+    # casual sleep queries ("help me sleep", "good for sleep") are intentionally
+    # excluded and will receive non-medical lifestyle responses
+    sleep_clinical = [
+        "sleep aid", "sleeping pill", "melatonin dose", "how much melatonin"
     ]
-
-    if any(t in q for t in therapeutic_intent):
+    if any(t in q for t in sleep_clinical):
         return True
 
     return False
