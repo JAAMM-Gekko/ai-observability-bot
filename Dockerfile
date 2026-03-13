@@ -3,7 +3,12 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # curl is needed for the healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    gcc \
+    g++ \
+    python3-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies first (layer-cache friendly)
