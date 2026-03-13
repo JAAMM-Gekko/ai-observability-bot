@@ -7,11 +7,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-EXCEL_PATH = os.getenv("FAQ_EXCEL_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Pemco_faqs.xlsx"))
+EXCEL_PATH = os.getenv("FAQ_EXCEL_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Cannabis FAQ_expanded_claude_rewritten.xlsx"))
 EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2' 
 CHROMA_COLLECTION_NAME = "company_faqs"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CHROMA_PERSIST_PATH = os.path.join(SCRIPT_DIR, "..", "amelia_chroma_db")
+CHROMA_PERSIST_PATH = os.path.join(SCRIPT_DIR, "..", "my_chroma_db")
 CHROMA_PERSIST_PATH = os.path.abspath(CHROMA_PERSIST_PATH)
 
 # 1. Load data from Excel
