@@ -282,7 +282,7 @@ def setup_splunk_otel():
         svc_name = os.getenv("OTEL_SERVICE_NAME", "beeai-faq-agent")
         env_name = os.getenv("OTEL_ENVIRONMENT", "production")
 
-        print(f"Setting up Splunk SignalFX OTEL integration...")
+        print("Setting up Splunk SignalFX OTEL integration...")
         print(f"   Endpoint: {otel_traces_url}")
         print(f"   Service: {svc_name}")
         print(f"   Environment: {env_name}")
