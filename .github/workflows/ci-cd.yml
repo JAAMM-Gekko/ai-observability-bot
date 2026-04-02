@@ -109,11 +109,13 @@ jobs:
       # ── Final assertions on the health payload ──
       - name: Assert health checks pass
         run: |
-          curl -sf http://localhost:8001/health | python3 - <<'PYEOF'
-          import sys, json
+          curl -sf http://localhost:8001/health -o /tmp/ci_health.json
+          cat /tmp/ci_health.json
+          python3 <<'PYEOF'
+          import json, sys
 
-          raw = sys.stdin.read()
-          d = json.loads(raw)
+          with open("/tmp/ci_health.json") as f:
+              d = json.load(f)
           rag   = d.get("rag_system", {})
           chroma = d.get("chroma_db", {})
 
