@@ -472,12 +472,6 @@ async def customer_websocket(websocket: WebSocket, session_id: str):
 # AGENT DASHBOARD ENDPOINTS
 # ============================================================================
 
-@app.get("/agent-dashboard", response_class=HTMLResponse)
-async def serve_agent_dashboard(request: Request):
-    """Serve the agent dashboard HTML page."""
-    return templates.TemplateResponse(request=request, name="agent-dashboard.html")
-
-
 @app.post("/api/agent/login")
 async def agent_login(agent_id: str, name: str, request: Request):
     """Register/login an agent."""

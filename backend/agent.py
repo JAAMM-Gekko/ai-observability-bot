@@ -1,32 +1,18 @@
 # backend/agent.py
-# Changes:
-# - Load SKILL.md from skills/cannabis-medical-safety/SKILL.md
-# - Create a separate "MedicalSafetyAgent" workflow that only runs when a user asks
-#   medical/health/dosage/interaction questions (so the skill tokens are only used when needed)
-# - Keep the retail/FAQ agent focused on compliant retail/FAQ guidance
 
-import asyncio
 import os
-import time
 import re
-
-# Disable tokenizer parallelism to avoid warnings and potential conflicts
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-from typing import List
+import time
 from dotenv import load_dotenv
-load_dotenv()
-
-# Configuration - REPLACE THESE VALUES
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# OTEL: use env so Docker can point to host (e.g. host.docker.internal:4328) or Splunk VM (10.0.0.249:4328)
-OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "http://localhost:4328").rstrip("/")
-SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "openai-sidecar-test")
-ENVIRONMENT = os.getenv("OTEL_ENVIRONMENT", "sidecar-agent")
-
+import chromadb
 import openai
+from beeai_framework.backend.chat import ChatModel
+from beeai_framework.emitter.emitter import Emitter
+from beeai_framework.tools.tool import Tool
+from beeai_framework.workflows.agent import AgentWorkflow, AgentWorkflowInput
+from pydantic import BaseModel, Field
+from sentence_transformers import SentenceTransformer
 
-# Observability Imports with Graceful Degradation
 try:
     import openlit
 except ImportError:
@@ -41,6 +27,18 @@ try:
     OTEL_AVAILABLE = True
 except ImportError:
     OTEL_AVAILABLE = False
+
+# Disable tokenizer parallelism to avoid warnings and potential conflicts
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+load_dotenv()
+
+# Configuration - REPLACE THESE VALUES
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# OTEL: use env so Docker can point to host (e.g. host.docker.internal:4328) or Splunk VM (10.0.0.249:4328)
+OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "http://localhost:4328").rstrip("/")
+SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "openai-sidecar-test")
+ENVIRONMENT = os.getenv("OTEL_ENVIRONMENT", "sidecar-agent")
 
 tracer = None
 if OTEL_AVAILABLE:
@@ -136,14 +134,6 @@ def patched_create(*args, **kwargs):
 openai.chat.completions.create = patched_create
 print("OpenAI SDK patched successfully")
 print("Sidecar is now listening...")
-
-from beeai_framework.backend.chat import ChatModel
-from beeai_framework.tools.tool import Tool
-from beeai_framework.workflows.agent import AgentWorkflow, AgentWorkflowInput
-from beeai_framework.emitter.emitter import Emitter
-from pydantic import BaseModel, Field
-from sentence_transformers import SentenceTransformer
-import chromadb
 
 # Configuration constants for the RAG system
 EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'
@@ -282,7 +272,7 @@ def setup_splunk_otel():
         svc_name = os.getenv("OTEL_SERVICE_NAME", "beeai-faq-agent")
         env_name = os.getenv("OTEL_ENVIRONMENT", "production")
 
-        print(f"Setting up Splunk SignalFX OTEL integration...")
+        print("Setting up Splunk SignalFX OTEL integration...")
         print(f"   Endpoint: {otel_traces_url}")
         print(f"   Service: {svc_name}")
         print(f"   Environment: {env_name}")
@@ -342,7 +332,6 @@ def _setup_rag_system():
     global _tracer_provider, _tracer
     global _medical_skill_instructions
 
-    # Note: we now have TWO workflows; both must exist to say "already setup".
     if (_embedding_model and _chroma_collection and _llm and _faq_tool_instance and
         _agent_workflow and _medical_agent_workflow and _medical_skill_instructions):
         print("RAG system already set up.")
@@ -411,11 +400,11 @@ def _setup_rag_system():
     _faq_tool_instance = FAQTool(embedding_model=_embedding_model, chroma_collection=_chroma_collection)
     print("FAQTool instance created.")
 
-    # --- Retail/FAQ workflow (kept lean; no long “ban list” needed if we route medical queries away) ---
-    _agent_workflow = AgentWorkflow(name="Company FAQ Assistant")
+    # --- Retail/FAQ workflow ---
+    _agent_workflow = AgentWorkflow(name='Company FAQ Assistant')
     _agent_workflow.add_agent(
-        name="FAQAgent",
-        role="A fun, friendly Washington cannabis budtender focused on compliance-safe FAQ guidance.",
+        name='FAQAgent',
+        role='A fun, friendly Washington cannabis budtender focused on compliance-safe FAQ guidance.',
         instructions=(
             "You are a Washington State cannabis retail compliance assistant with a fun budtender vibe. "
             "Your primary goal is to answer using only the provided FAQ context. "
@@ -429,7 +418,7 @@ def _setup_rag_system():
             "(example: customers often describe this as uplifting or relaxing). "
 
             "If a user asks a health or medical question, those questions are handled by a separate "
-            "medical safety skill, so do not answer them here."
+            "medical safety skill, so do not answer them here. "
 
             "Do NOT try to use the 'faq_lookup_tool' on your own if context is already provided. "
 
@@ -629,7 +618,6 @@ async def run_faq_agent(user_query: str, conversation_context: str = "") -> str:
                 if use_medical_skill:
                     with _tracer.start_as_current_span("medical_skill_execution") as med_span:
                         med_span.set_attribute("agent.name", "MedicalSafetyAgent")
-
                         med_prompt = _build_medical_prompt(user_query, conversation_context)
                         response = await _medical_agent_workflow.run(
                             inputs=[AgentWorkflowInput(prompt=med_prompt)]
