@@ -29,11 +29,13 @@ from agent import run_faq_agent, _setup_rag_system
 from sentiment_analyzer import SentimentAnalyzer, ConversationTracker, generate_conversation_summary
 from email_service import EmailService
 from guardrails_nemo import enforce_medical_output_guardrails
+from conversation_memory import ConversationMemoryManager
 
 # Initialize sentiment analysis and email service (singletons shared across requests)
 _sentiment_analyzer = SentimentAnalyzer(frustration_threshold=0.6)
 _conversation_tracker = ConversationTracker(frustration_threshold=0.6, trigger_count=3)
 _email_service = EmailService()
+_memory_manager = ConversationMemoryManager()
 
 load_dotenv()
 
@@ -184,18 +186,18 @@ async def startup_event():
 @app.get("/", response_class=HTMLResponse)
 async def serve_frontend(request: Request):
     """Serve the main HTML page for the frontend."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="index.html")
 
 @app.get("/agent-dashboard", response_class=HTMLResponse)
 @app.get("/agent-dashboard.html", response_class=HTMLResponse)
 async def serve_agent_dashboard(request: Request):
     """Serve the agent dashboard HTML page."""
-    return templates.TemplateResponse("agent-dashboard.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="agent-dashboard.html")
 
 @app.get("/company-cite.html", response_class=HTMLResponse)
 async def serve_company_cite(request: Request):
     """Serve the company website page (embedded in iframe on main page)."""
-    return templates.TemplateResponse("company-cite.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="company-cite.html")
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request_body: ChatRequest):
@@ -338,13 +340,24 @@ async def chat_endpoint(request_body: ChatRequest):
     
     # Process with AI agent
     try:
-        agent_answer = await run_faq_agent(user_query)
+        conversation_context = await _memory_manager.get_context(session_id)
+
+        agent_answer = await run_faq_agent(user_query, conversation_context=conversation_context)
 
         # Apply NeMo Guardrails as a post-response safety layer to ensure that
         # no cannabis-related medical advice or therapeutic claims are returned
         # to the end user. If NeMo is not installed or its config fails to load,
         # this call is effectively a no-op and the original answer is used.
         safe_answer = await enforce_medical_output_guardrails(user_query, agent_answer)
+
+        # Persist the turn in sliding-window memory (may trigger compression)
+        await _memory_manager.add_turn(session_id, user_query, safe_answer)
+
+        mem_stats = _memory_manager.get_stats(session_id)
+        print(
+            f"[Memory] session={session_id} window={mem_stats['window_turns']} "
+            f"summary_turns={mem_stats['summary_turns']} summary_len={mem_stats['summary_len']}"
+        )
 
         session_manager.add_message(session_id, ChatMessage(
             sender="agent",
@@ -462,7 +475,7 @@ async def customer_websocket(websocket: WebSocket, session_id: str):
 @app.get("/agent-dashboard", response_class=HTMLResponse)
 async def serve_agent_dashboard(request: Request):
     """Serve the agent dashboard HTML page."""
-    return templates.TemplateResponse("agent-dashboard.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="agent-dashboard.html")
 
 
 @app.post("/api/agent/login")

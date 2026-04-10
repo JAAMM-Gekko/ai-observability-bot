@@ -431,7 +431,11 @@ def _setup_rag_system():
             "If a user asks a health or medical question, those questions are handled by a separate "
             "medical safety skill, so do not answer them here."
 
-            "Do NOT try to use the 'faq_lookup_tool' on your own if context is already provided."
+            "Do NOT try to use the 'faq_lookup_tool' on your own if context is already provided. "
+
+            "You may receive a conversation summary and/or recent chat history as part of the prompt. "
+            "Use this context to understand follow-up questions (e.g. 'tell me more', 'what about the other one') "
+            "and maintain conversational coherence across multiple turns."
         ),
         tools=[_faq_tool_instance],
         llm=_llm,
@@ -439,11 +443,17 @@ def _setup_rag_system():
 
     # --- Medical safety workflow (skill-based; only invoked on medical-ish queries) ---
     _medical_agent_workflow = AgentWorkflow(name="Cannabis Medical Safety")
+    _medical_safety_instructions = (
+        _medical_skill_instructions + "\n\n"
+        "You may receive a conversation summary and/or recent chat history as part of the prompt. "
+        "Use this context to understand follow-up questions and maintain conversational coherence, "
+        "while still following all safety and disclaimer rules above."
+    )
     _medical_agent_workflow.add_agent(
         name="MedicalSafetyAgent",
         role="A cannabis medical information safety specialist.",
-        instructions=_medical_skill_instructions,
-        tools=[],   # intentionally no tools here; your SKILL.md already says no numeric dosing unless retrieved.
+        instructions=_medical_safety_instructions,
+        tools=[],
         llm=_llm,
     )
 
@@ -568,11 +578,32 @@ class FAQTool(Tool):
                 return f"Error processing query for FAQ lookup: {e}"
 
 
-async def run_faq_agent(user_query: str) -> str:
+def _build_faq_prompt(retrieved_info: str, user_query: str, conversation_context: str = "") -> str:
+    """Assemble the final prompt with optional conversation memory context."""
+    context_section = f"\n\n{conversation_context}\n" if conversation_context else ""
+    return (
+        f"Retrieved Company FAQ Information:\n{retrieved_info}"
+        f"{context_section}"
+        f"\n\nUser Question: {user_query}"
+    )
+
+
+def _build_medical_prompt(user_query: str, conversation_context: str = "") -> str:
+    """Assemble the medical-skill prompt with optional conversation memory."""
+    if conversation_context:
+        return f"{conversation_context}\n\nUser Question: {user_query}"
+    return user_query
+
+
+async def run_faq_agent(user_query: str, conversation_context: str = "") -> str:
     """
     Main entrypoint.
     - If query is medical/health/dosage/interaction related, route to MedicalSafetyAgent (skill-based).
     - Otherwise run retail FAQ RAG + FAQAgent.
+
+    ``conversation_context`` is an optional pre-formatted string containing the
+    sliding-window memory (summary + recent turns) produced by
+    ConversationMemoryManager.
     """
     if _tracer:
         with _tracer.start_as_current_span("faq_agent_workflow") as span:
@@ -580,6 +611,8 @@ async def run_faq_agent(user_query: str) -> str:
             span.set_attribute("workflow.query", user_query)
             span.set_attribute("workflow.query_length", len(user_query))
             span.set_attribute("workflow.timestamp", time.time())
+            span.set_attribute("memory.context_length", len(conversation_context))
+            span.set_attribute("memory.has_context", bool(conversation_context))
 
             try:
                 with _tracer.start_as_current_span("rag_system_setup") as setup_span:
@@ -594,19 +627,18 @@ async def run_faq_agent(user_query: str) -> str:
                 span.set_attribute("routing.medical_skill", use_medical_skill)
 
                 if use_medical_skill:
-                    # No FAQ retrieval; directly answer using skill constraints
                     with _tracer.start_as_current_span("medical_skill_execution") as med_span:
                         med_span.set_attribute("agent.name", "MedicalSafetyAgent")
 
+                        med_prompt = _build_medical_prompt(user_query, conversation_context)
                         response = await _medical_agent_workflow.run(
-                            inputs=[AgentWorkflowInput(prompt=user_query)]
+                            inputs=[AgentWorkflowInput(prompt=med_prompt)]
                         )
 
                         final_answer = response.result.final_answer
                         med_span.set_attribute("workflow.response_length", len(final_answer))
                         med_span.set_attribute("workflow.success", True)
 
-                        # Useful for SIEM searches
                         max_len = int(os.getenv("OTEL_TEXT_MAX_LEN", "4096"))
                         if max_len > 0:
                             prompt_attr = user_query if len(user_query) <= max_len else (user_query[:max_len] + "…")
@@ -626,7 +658,7 @@ async def run_faq_agent(user_query: str) -> str:
                     tool_span.set_attribute("tool.response_length", len(retrieved_info))
                     tool_span.set_attribute("tool.success", True)
 
-                prompt_for_agent = f"Retrieved Company FAQ Information:\n{retrieved_info}\n\nUser Question: {user_query}"
+                prompt_for_agent = _build_faq_prompt(retrieved_info, user_query, conversation_context)
 
                 with _tracer.start_as_current_span("prompt_construction") as prompt_span:
                     prompt_span.set_attribute("prompt.retrieved_info_length", len(retrieved_info))
@@ -670,8 +702,9 @@ async def run_faq_agent(user_query: str) -> str:
 
     if _is_medical_skill_query(user_query):
         try:
+            med_prompt = _build_medical_prompt(user_query, conversation_context)
             response = await _medical_agent_workflow.run(
-                inputs=[AgentWorkflowInput(prompt=user_query)]
+                inputs=[AgentWorkflowInput(prompt=med_prompt)]
             )
             return response.result.final_answer
         except Exception as e:
@@ -680,7 +713,7 @@ async def run_faq_agent(user_query: str) -> str:
 
     print("Calling the faq_lookup_tool...")
     retrieved_info = await _faq_tool_instance._run(user_query)
-    prompt_for_agent = f"Retrieved Company FAQ Information:\n{retrieved_info}\n\nUser Question: {user_query}"
+    prompt_for_agent = _build_faq_prompt(retrieved_info, user_query, conversation_context)
 
     try:
         response = await _agent_workflow.run(
