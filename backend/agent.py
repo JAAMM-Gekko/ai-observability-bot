@@ -1,32 +1,18 @@
 # backend/agent.py
-# Changes:
-# - Load SKILL.md from skills/cannabis-medical-safety/SKILL.md
-# - Create a separate "MedicalSafetyAgent" workflow that only runs when a user asks
-#   medical/health/dosage/interaction questions (so the skill tokens are only used when needed)
-# - Keep the retail/FAQ agent focused on compliant retail/FAQ guidance
 
-import asyncio
 import os
-import time
 import re
-
-# Disable tokenizer parallelism to avoid warnings and potential conflicts
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-from typing import List
+import time
 from dotenv import load_dotenv
-load_dotenv()
-
-# Configuration - REPLACE THESE VALUES
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# OTEL: use env so Docker can point to host (e.g. host.docker.internal:4328) or Splunk VM (10.0.0.249:4328)
-OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "http://localhost:4328").rstrip("/")
-SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "openai-sidecar-test")
-ENVIRONMENT = os.getenv("OTEL_ENVIRONMENT", "sidecar-agent")
-
+import chromadb
 import openai
+from beeai_framework.backend.chat import ChatModel
+from beeai_framework.emitter.emitter import Emitter
+from beeai_framework.tools.tool import Tool
+from beeai_framework.workflows.agent import AgentWorkflow, AgentWorkflowInput
+from pydantic import BaseModel, Field
+from sentence_transformers import SentenceTransformer
 
-# Observability Imports with Graceful Degradation
 try:
     import openlit
 except ImportError:
@@ -41,6 +27,18 @@ try:
     OTEL_AVAILABLE = True
 except ImportError:
     OTEL_AVAILABLE = False
+
+# Disable tokenizer parallelism to avoid warnings and potential conflicts
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+load_dotenv()
+
+# Configuration - REPLACE THESE VALUES
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# OTEL: use env so Docker can point to host (e.g. host.docker.internal:4328) or Splunk VM (10.0.0.249:4328)
+OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "http://localhost:4328").rstrip("/")
+SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "openai-sidecar-test")
+ENVIRONMENT = os.getenv("OTEL_ENVIRONMENT", "sidecar-agent")
 
 tracer = None
 if OTEL_AVAILABLE:
@@ -137,14 +135,6 @@ openai.chat.completions.create = patched_create
 print("OpenAI SDK patched successfully")
 print("Sidecar is now listening...")
 
-from beeai_framework.backend.chat import ChatModel
-from beeai_framework.tools.tool import Tool
-from beeai_framework.workflows.agent import AgentWorkflow, AgentWorkflowInput
-from beeai_framework.emitter.emitter import Emitter
-from pydantic import BaseModel, Field
-from sentence_transformers import SentenceTransformer
-import chromadb
-
 # Configuration constants for the RAG system
 EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'
 CHROMA_PERSIST_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "my_chroma_db")
@@ -161,8 +151,7 @@ _chroma_collection = None
 _llm = None
 _faq_tool_instance = None
 
-_agent_workflow = None                 # retail/FAQ workflow
-_medical_agent_workflow = None         # medical safety workflow (skill-based)
+_agent_workflow = None                 # single workflow for both retail FAQ and medical safety paths
 
 _tracer_provider = None
 _tracer = None
@@ -338,13 +327,12 @@ def test_span_export(tracer_provider, endpoint: str):
 
 def _setup_rag_system():
     global _embedding_model, _chroma_collection, _llm, _faq_tool_instance
-    global _agent_workflow, _medical_agent_workflow
+    global _agent_workflow
     global _tracer_provider, _tracer
     global _medical_skill_instructions
 
-    # Note: we now have TWO workflows; both must exist to say "already setup".
     if (_embedding_model and _chroma_collection and _llm and _faq_tool_instance and
-        _agent_workflow and _medical_agent_workflow and _medical_skill_instructions):
+        _agent_workflow and _medical_skill_instructions):
         print("RAG system already set up.")
         return True
 
@@ -411,11 +399,12 @@ def _setup_rag_system():
     _faq_tool_instance = FAQTool(embedding_model=_embedding_model, chroma_collection=_chroma_collection)
     print("FAQTool instance created.")
 
-    # --- Retail/FAQ workflow (kept lean; no long “ban list” needed if we route medical queries away) ---
-    _agent_workflow = AgentWorkflow(name="Company FAQ Assistant")
+    # Single workflow for both retail FAQ and medical safety paths.
+    # Medical queries prepend skill instructions at call time; no second workflow needed.
+    _agent_workflow = AgentWorkflow(name='Company FAQ Assistant')
     _agent_workflow.add_agent(
-        name="FAQAgent",
-        role="A fun, friendly Washington cannabis budtender focused on compliance-safe FAQ guidance.",
+        name='FAQAgent',
+        role='A fun, friendly Washington cannabis budtender focused on compliance-safe FAQ guidance.',
         instructions=(
             "You are a Washington State cannabis retail compliance assistant with a fun budtender vibe. "
             "Your primary goal is to answer using only the provided FAQ context. "
@@ -428,8 +417,7 @@ def _setup_rag_system():
             "potency details, consumption methods, and neutral consumer-reported experiences "
             "(example: customers often describe this as uplifting or relaxing). "
 
-            "If a user asks a health or medical question, those questions are handled by a separate "
-            "medical safety skill, so do not answer them here."
+            "When medical skill instructions are prepended to the prompt, follow them precisely. "
 
             "Do NOT try to use the 'faq_lookup_tool' on your own if context is already provided."
         ),
@@ -437,17 +425,7 @@ def _setup_rag_system():
         llm=_llm,
     )
 
-    # --- Medical safety workflow (skill-based; only invoked on medical-ish queries) ---
-    _medical_agent_workflow = AgentWorkflow(name="Cannabis Medical Safety")
-    _medical_agent_workflow.add_agent(
-        name="MedicalSafetyAgent",
-        role="A cannabis medical information safety specialist.",
-        instructions=_medical_skill_instructions,
-        tools=[],   # intentionally no tools here; your SKILL.md already says no numeric dosing unless retrieved.
-        llm=_llm,
-    )
-
-    print("Agent workflows created: FAQAgent + MedicalSafetyAgent (skill-based).")
+    print("Agent workflow created: FAQAgent (handles retail FAQ and medical safety paths).")
     return True
 
 
@@ -594,12 +572,13 @@ async def run_faq_agent(user_query: str) -> str:
                 span.set_attribute("routing.medical_skill", use_medical_skill)
 
                 if use_medical_skill:
-                    # No FAQ retrieval; directly answer using skill constraints
+                    # No FAQ retrieval; prepend skill instructions and pass to the single workflow
                     with _tracer.start_as_current_span("medical_skill_execution") as med_span:
-                        med_span.set_attribute("agent.name", "MedicalSafetyAgent")
+                        med_span.set_attribute("agent.name", "FAQAgent")
 
-                        response = await _medical_agent_workflow.run(
-                            inputs=[AgentWorkflowInput(prompt=user_query)]
+                        prompt_for_agent = f"{_medical_skill_instructions}\n\nUser Question: {user_query}"
+                        response = await _agent_workflow.run(
+                            inputs=[AgentWorkflowInput(prompt=prompt_for_agent)]
                         )
 
                         final_answer = response.result.final_answer
@@ -670,8 +649,9 @@ async def run_faq_agent(user_query: str) -> str:
 
     if _is_medical_skill_query(user_query):
         try:
-            response = await _medical_agent_workflow.run(
-                inputs=[AgentWorkflowInput(prompt=user_query)]
+            prompt_for_agent = f"{_medical_skill_instructions}\n\nUser Question: {user_query}"
+            response = await _agent_workflow.run(
+                inputs=[AgentWorkflowInput(prompt=prompt_for_agent)]
             )
             return response.result.final_answer
         except Exception as e:
@@ -700,7 +680,6 @@ def get_observability_data() -> dict:
             "llm_initialized": _llm is not None,
             "faq_tool_ready": _faq_tool_instance is not None,
             "agent_workflow_ready": _agent_workflow is not None,
-            "medical_skill_workflow_ready": _medical_agent_workflow is not None,
             "medical_skill_loaded": _medical_skill_instructions is not None,
             "medical_skill_path": CANNABIS_MEDICAL_SKILL_PATH,
         },
@@ -720,7 +699,7 @@ def get_observability_data() -> dict:
         },
         "status": "ready" if all([
             _embedding_model, _chroma_collection, _llm,
-            _faq_tool_instance, _agent_workflow, _medical_agent_workflow,
+            _faq_tool_instance, _agent_workflow,
             _medical_skill_instructions
         ]) else "initializing"
     }
