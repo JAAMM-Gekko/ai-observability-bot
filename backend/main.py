@@ -340,9 +340,9 @@ async def chat_endpoint(request_body: ChatRequest):
     
     # Process with AI agent
     try:
-        conversation_context = await _memory_manager.get_context(session_id)
+        routing_context = _memory_manager.get_compact_context(session_id, max_turns=2)
 
-        agent_answer = await run_faq_agent(user_query, conversation_context=conversation_context)
+        agent_answer = await run_faq_agent(user_query, routing_context=routing_context)
 
         # Apply NeMo Guardrails as a post-response safety layer to ensure that
         # no cannabis-related medical advice or therapeutic claims are returned

@@ -260,6 +260,47 @@ def _is_medical_skill_query(user_query: str) -> bool:
     return False
 
 
+ROUTER_MODEL = os.getenv("INTENT_ROUTER_MODEL", "gpt-4o-mini")
+
+
+async def _classify_intent(user_query: str, routing_context: str = "") -> bool:
+    """Two-stage router. Returns True = medical, False = retail.
+
+    Stage 1: keyword hard-rules (no LLM, zero cost).
+    Stage 2: gpt-4o-mini classifier (temp=0, output: retail | medical).
+    """
+    if _is_medical_skill_query(user_query):
+        return True
+
+    ctx_block = (
+        f"\n\nConversation context:\n{routing_context}" if routing_context else ""
+    )
+    prompt = (
+        "Classify the following customer message as either 'retail' or 'medical'.\n"
+        "- retail: product info, prices, store hours, strains, flavours, "
+        "general cannabis questions\n"
+        "- medical: dosage, drug interactions, health conditions, "
+        "prescriptions, safety\n"
+        f"{ctx_block}\n\n"
+        f"Message: {user_query}\n\n"
+        "Reply with exactly one word: retail or medical"
+    )
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        resp = await client.chat.completions.create(
+            model=ROUTER_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=5,
+        )
+        label = resp.choices[0].message.content.strip().lower()
+        return label == "medical"
+    except Exception as e:
+        print(f"[Router] LLM classify failed, falling back to keyword: {e}")
+        return False
+
+
 def setup_splunk_otel():
     if not OTEL_AVAILABLE:
         print("OpenTelemetry not available - skipping OTEL setup")
@@ -327,12 +368,12 @@ def test_span_export(tracer_provider, endpoint: str):
 
 def _setup_rag_system():
     global _embedding_model, _chroma_collection, _llm, _faq_tool_instance
-    global _agent_workflow
+    global _agent_workflow, _medical_agent_workflow
     global _tracer_provider, _tracer
     global _medical_skill_instructions
 
     if (_embedding_model and _chroma_collection and _llm and _faq_tool_instance and
-        _agent_workflow and _medical_skill_instructions):
+            _agent_workflow and _medical_agent_workflow and _medical_skill_instructions):
         print("RAG system already set up.")
         return True
 
@@ -566,32 +607,34 @@ class FAQTool(Tool):
                 return f"Error processing query for FAQ lookup: {e}"
 
 
-def _build_faq_prompt(retrieved_info: str, user_query: str, conversation_context: str = "") -> str:
-    """Assemble the final prompt with optional conversation memory context."""
-    context_section = f"\n\n{conversation_context}\n" if conversation_context else ""
+def _build_faq_prompt(retrieved_info: str, user_query: str, routing_context: str = "") -> str:
+    """Assemble the final prompt with optional compact routing context."""
+    ctx = f"\n\n{routing_context}\n" if routing_context else ""
     return (
         f"Retrieved Company FAQ Information:\n{retrieved_info}"
-        f"{context_section}"
+        f"{ctx}"
         f"\n\nUser Question: {user_query}"
     )
 
 
-def _build_medical_prompt(user_query: str, conversation_context: str = "") -> str:
-    """Assemble the medical-skill prompt with optional conversation memory."""
-    if conversation_context:
-        return f"{conversation_context}\n\nUser Question: {user_query}"
+def _build_medical_prompt(user_query: str, routing_context: str = "") -> str:
+    """Assemble the medical-skill prompt with optional compact routing context."""
+    if routing_context:
+        return f"{routing_context}\n\nUser Question: {user_query}"
     return user_query
 
 
-async def run_faq_agent(user_query: str, conversation_context: str = "") -> str:
+async def run_faq_agent(
+    user_query: str,
+    conversation_context: str = "",  # kept for backward compat
+    routing_context: str = "",       # compact context: last 2 Qs + one-line summary
+) -> str:
     """
     Main entrypoint.
-    - If query is medical/health/dosage/interaction related, route to MedicalSafetyAgent (skill-based).
-    - Otherwise run retail FAQ RAG + FAQAgent.
-
-    ``conversation_context`` is an optional pre-formatted string containing the
-    sliding-window memory (summary + recent turns) produced by
-    ConversationMemoryManager.
+    - Stage 1: keyword hard-rules → medical if matched.
+    - Stage 2: gpt-4o-mini classifier (temp=0) with compact routing_context.
+    - Medical route: MedicalSafetyAgent (no RAG).
+    - Retail route: FAQAgent with RAG.
     """
     if _tracer:
         with _tracer.start_as_current_span("faq_agent_workflow") as span:
@@ -599,8 +642,8 @@ async def run_faq_agent(user_query: str, conversation_context: str = "") -> str:
             span.set_attribute("workflow.query", user_query)
             span.set_attribute("workflow.query_length", len(user_query))
             span.set_attribute("workflow.timestamp", time.time())
-            span.set_attribute("memory.context_length", len(conversation_context))
-            span.set_attribute("memory.has_context", bool(conversation_context))
+            span.set_attribute("memory.context_length", len(routing_context))
+            span.set_attribute("memory.has_context", bool(routing_context))
 
             try:
                 with _tracer.start_as_current_span("rag_system_setup") as setup_span:
@@ -610,14 +653,15 @@ async def run_faq_agent(user_query: str, conversation_context: str = "") -> str:
                         return "Backend RAG system failed to initialize. Please check server logs."
                     setup_span.set_attribute("setup.status", "success")
 
-                # === Skill routing ===
-                use_medical_skill = _is_medical_skill_query(user_query)
+                # === Intent routing (keyword fast-path + LLM fallback) ===
+                use_medical_skill = await _classify_intent(user_query, routing_context)
                 span.set_attribute("routing.medical_skill", use_medical_skill)
+                span.set_attribute("routing.context_used", bool(routing_context))
 
                 if use_medical_skill:
                     with _tracer.start_as_current_span("medical_skill_execution") as med_span:
                         med_span.set_attribute("agent.name", "MedicalSafetyAgent")
-                        med_prompt = _build_medical_prompt(user_query, conversation_context)
+                        med_prompt = _build_medical_prompt(user_query, routing_context)
                         response = await _medical_agent_workflow.run(
                             inputs=[AgentWorkflowInput(prompt=med_prompt)]
                         )
@@ -645,7 +689,7 @@ async def run_faq_agent(user_query: str, conversation_context: str = "") -> str:
                     tool_span.set_attribute("tool.response_length", len(retrieved_info))
                     tool_span.set_attribute("tool.success", True)
 
-                prompt_for_agent = _build_faq_prompt(retrieved_info, user_query, conversation_context)
+                prompt_for_agent = _build_faq_prompt(retrieved_info, user_query, routing_context)
 
                 with _tracer.start_as_current_span("prompt_construction") as prompt_span:
                     prompt_span.set_attribute("prompt.retrieved_info_length", len(retrieved_info))
@@ -687,9 +731,10 @@ async def run_faq_agent(user_query: str, conversation_context: str = "") -> str:
     if not _setup_rag_system():
         return "Backend RAG system failed to initialize. Please check server logs."
 
-    if _is_medical_skill_query(user_query):
+    use_medical_skill = await _classify_intent(user_query, routing_context)
+    if use_medical_skill:
         try:
-            med_prompt = _build_medical_prompt(user_query, conversation_context)
+            med_prompt = _build_medical_prompt(user_query, routing_context)
             response = await _medical_agent_workflow.run(
                 inputs=[AgentWorkflowInput(prompt=med_prompt)]
             )
@@ -700,7 +745,7 @@ async def run_faq_agent(user_query: str, conversation_context: str = "") -> str:
 
     print("Calling the faq_lookup_tool...")
     retrieved_info = await _faq_tool_instance._run(user_query)
-    prompt_for_agent = _build_faq_prompt(retrieved_info, user_query, conversation_context)
+    prompt_for_agent = _build_faq_prompt(retrieved_info, user_query, routing_context)
 
     try:
         response = await _agent_workflow.run(

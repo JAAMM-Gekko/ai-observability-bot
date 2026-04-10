@@ -94,6 +94,25 @@ class ConversationMemoryManager:
         """Clear all memory for a session."""
         self._sessions.pop(session_id, None)
 
+    def get_compact_context(self, session_id: str, max_turns: int = 2) -> str:
+        """Return a lightweight context string for routing and sub-agent prompts.
+
+        Contains:
+        - One-line summary of earlier conversation (first sentence of running summary).
+        - Last ``max_turns`` user questions verbatim (no bot responses).
+        """
+        mem = self._sessions.get(session_id)
+        if mem is None:
+            return ""
+        parts: list[str] = []
+        if mem.summary:
+            one_line = mem.summary.split(".")[0].strip() + "."
+            parts.append(f"Earlier context: {one_line}")
+        recent_user_qs = [u for u, _ in mem.recent_turns][-max_turns:]
+        if recent_user_qs:
+            parts.append("Recent questions: " + " | ".join(recent_user_qs))
+        return "\n".join(parts)
+
     def get_stats(self, session_id: str) -> dict:
         """Return lightweight stats useful for OTEL span attributes."""
         mem = self._sessions.get(session_id)
