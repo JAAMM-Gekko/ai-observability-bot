@@ -151,8 +151,7 @@ _chroma_collection = None
 _llm = None
 _faq_tool_instance = None
 
-_agent_workflow = None                 # retail/FAQ workflow
-_medical_agent_workflow = None         # medical safety workflow (skill-based)
+_agent_workflow = None                 # single workflow for both retail FAQ and medical safety paths
 
 _tracer_provider = None
 _tracer = None
@@ -219,7 +218,7 @@ def _is_medical_skill_query(user_query: str) -> bool:
     """
     Router: if query requires clinical guardrails (dosing, drug interactions,
     escalation emergencies), route to medical safety skill workflow.
-    
+
     General wellness/lifestyle queries (sleep, anxiety, relaxation) flow straight
     to LLM to receive non-medical descriptive responses per sponsor guidelines.
     """
@@ -328,12 +327,12 @@ def test_span_export(tracer_provider, endpoint: str):
 
 def _setup_rag_system():
     global _embedding_model, _chroma_collection, _llm, _faq_tool_instance
-    global _agent_workflow, _medical_agent_workflow
+    global _agent_workflow
     global _tracer_provider, _tracer
     global _medical_skill_instructions
 
     if (_embedding_model and _chroma_collection and _llm and _faq_tool_instance and
-        _agent_workflow and _medical_agent_workflow and _medical_skill_instructions):
+        _agent_workflow and _medical_skill_instructions):
         print("RAG system already set up.")
         return True
 
@@ -721,7 +720,6 @@ def get_observability_data() -> dict:
             "llm_initialized": _llm is not None,
             "faq_tool_ready": _faq_tool_instance is not None,
             "agent_workflow_ready": _agent_workflow is not None,
-            "medical_skill_workflow_ready": _medical_agent_workflow is not None,
             "medical_skill_loaded": _medical_skill_instructions is not None,
             "medical_skill_path": CANNABIS_MEDICAL_SKILL_PATH,
         },
@@ -741,7 +739,7 @@ def get_observability_data() -> dict:
         },
         "status": "ready" if all([
             _embedding_model, _chroma_collection, _llm,
-            _faq_tool_instance, _agent_workflow, _medical_agent_workflow,
+            _faq_tool_instance, _agent_workflow,
             _medical_skill_instructions
         ]) else "initializing"
     }
