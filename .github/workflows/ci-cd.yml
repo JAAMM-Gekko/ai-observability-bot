@@ -27,7 +27,12 @@ jobs:
       # W/E style issues are pre-existing in the codebase and excluded here.
       # F401 (unused import) also excluded — pre-existing across all files.
       # Still catches: F811 (duplicate def), F541 (empty f-string), F821 (undefined name), etc.
+      # Only check critical pyflakes errors (F-codes).
+      # W/E style issues are pre-existing in the codebase and excluded here.
+      # F401 (unused import) also excluded — pre-existing across all files.
+      # Still catches: F811 (duplicate def), F541 (empty f-string), F821 (undefined name), etc.
       - name: Lint backend/
+        run: flake8 backend/ --select=F --extend-ignore=F401 --exclude=backend/check_openai.py
         run: flake8 backend/ --select=F --extend-ignore=F401 --exclude=backend/check_openai.py
 
   # ──────────────────────────────────────────────
@@ -154,4 +159,3 @@ jobs:
       - name: Cleanup
         if: always()
         run: docker rm -f ci-bot 2>/dev/null || true
-
