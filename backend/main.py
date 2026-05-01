@@ -30,6 +30,7 @@ from sentiment_analyzer import SentimentAnalyzer, ConversationTracker, generate_
 from email_service import EmailService
 from guardrails_nemo import enforce_medical_output_guardrails
 from conversation_memory import ConversationMemoryManager
+from persona_agent import load_persona, run_persona_chat
 
 # Initialize sentiment analysis and email service (singletons shared across requests)
 _sentiment_analyzer = SentimentAnalyzer(frustration_threshold=0.6)
@@ -198,6 +199,72 @@ async def serve_agent_dashboard(request: Request):
 async def serve_company_cite(request: Request):
     """Serve the company website page (embedded in iframe on main page)."""
     return templates.TemplateResponse(request=request, name="company-cite.html")
+
+
+# ============================================================================
+# PERSONA EXPERIMENT ENDPOINTS
+# ============================================================================
+
+class PersonaChatRequest(BaseModel):
+    query: str
+    persona_id: str
+    session_id: str | None = None
+
+
+class PersonaChatResponse(BaseModel):
+    answer: str
+    session_id: str
+    persona_id: str
+
+
+_persona_sessions: dict[str, list[dict]] = {}
+
+
+@app.get("/persona-v1", response_class=HTMLResponse)
+async def serve_persona_v1(request: Request):
+    """Serve the persona experiment page for budtender-v1."""
+    persona = load_persona("budtender-v1")
+    return templates.TemplateResponse(
+        request=request,
+        name="persona-chat.html",
+        context={
+            "persona_id": "budtender-v1",
+            "persona_display_name": persona["display_name"] if persona else "Chat",
+            "persona_greeting": persona["greeting"] if persona else "Hi! How can I help?",
+        },
+    )
+
+
+@app.post("/persona-chat", response_model=PersonaChatResponse)
+async def persona_chat_endpoint(request_body: PersonaChatRequest):
+    """Chat endpoint for persona experiments. Isolated from the main /chat pipeline."""
+    persona_id = request_body.persona_id
+    user_query = request_body.query
+    session_id = request_body.session_id or str(uuid.uuid4())
+
+    history = _persona_sessions.get(session_id, [])
+
+    answer = await run_persona_chat(
+        query=user_query,
+        persona_id=persona_id,
+        session_id=session_id,
+        conversation_history=history[-10:],
+    )
+
+    history.append({"role": "user", "content": user_query})
+    history.append({"role": "assistant", "content": answer})
+    _persona_sessions[session_id] = history
+
+    return PersonaChatResponse(
+        answer=answer,
+        session_id=session_id,
+        persona_id=persona_id,
+    )
+
+
+# ============================================================================
+# MAIN CHAT ENDPOINT
+# ============================================================================
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request_body: ChatRequest):
