@@ -55,7 +55,7 @@ async def upload_faqs(faqs):
             VALUES ($1, $2, $3, $4, $5)
         """, chunk_id, document_id, uuid.UUID(TENANT_ID), i, chunk_text)
 
-        vector = get_embedding(chunk_text)
+        vector = "[" + ",".join(str(x) for x in get_embedding(chunk_text)) + "]"
         await conn.execute("""
             INSERT INTO embedding
                 (embedding_id, document_chunk_id, document_id, tenant_id, embedding)
