@@ -711,13 +711,31 @@ def _build_retail_fallback_prompt(
 ) -> str:
     context_block = f"\n\nConversation context:\n{routing_context}" if routing_context else ""
 
+    product_ctx = ""
+    try:
+        from product_tool import run_product_tool_call
+        from persona_agent import _is_product_query
+        if _is_product_query(user_query):
+            product_data = run_product_tool_call(user_query)
+            product_ctx = (
+                "\n\n### AVAILABLE PRODUCTS IN STORE (recommend ONLY from these):\n"
+                + product_data
+                + "\n\nIMPORTANT: Only recommend products listed above. "
+                "Do not invent products. Include the product name, price, and a brief "
+                "description of the vibe/effect when recommending."
+            )
+            print(f"[ProductTool] Injected product context (fallback) for query: {user_query[:60]}...")
+    except Exception as e:
+        print(f"[ProductTool] Fallback error (non-fatal): {e}")
+
     return (
         "You are a Washington cannabis retail compliance assistant.\n"
         "No suitable answer was found in the store FAQ database for this question.\n"
         "Answer using general model knowledge while staying conservative and compliant.\n"
         "If uncertain, acknowledge uncertainty and avoid fabricating store-specific facts.\n"
         "Do NOT provide medical advice, dosage guidance, or therapeutic claims."
-        f"{context_block}\n\n"
+        f"{context_block}"
+        f"{product_ctx}\n\n"
         f"User Question: {user_query}"
     )
 
@@ -943,11 +961,30 @@ async def run_retail_with_constraints(
 
 
 def _build_faq_prompt(retrieved_info: str, user_query: str, routing_context: str = "") -> str:
-    """Assemble the final prompt with optional compact routing context."""
+    """Assemble the final prompt with optional compact routing context and product data."""
     ctx = f"\n\n{routing_context}\n" if routing_context else ""
+
+    product_ctx = ""
+    try:
+        from product_tool import run_product_tool_call
+        from persona_agent import _is_product_query
+        if _is_product_query(user_query):
+            product_data = run_product_tool_call(user_query)
+            product_ctx = (
+                "\n\n### AVAILABLE PRODUCTS IN STORE (recommend ONLY from these):\n"
+                + product_data
+                + "\n\nIMPORTANT: Only recommend products listed above. "
+                "Do not invent products. Include the product name, price, and a brief "
+                "description of the vibe/effect when recommending."
+            )
+            print(f"[ProductTool] Injected product context for query: {user_query[:60]}...")
+    except Exception as e:
+        print(f"[ProductTool] Error (non-fatal): {e}")
+
     return (
         f"Retrieved Company FAQ Information:\n{retrieved_info}"
         f"{ctx}"
+        f"{product_ctx}"
         f"\n\nUser Question: {user_query}"
     )
 

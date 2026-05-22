@@ -67,6 +67,26 @@ async def _retrieve_faq_context_async(query: str, top_k: int = 5) -> str:
         return ""
 
 
+_PRODUCT_TRIGGER_KEYWORDS = [
+    "product", "recommend", "suggestion", "what do you have",
+    "what's available", "what is available", "show me", "looking for",
+    "edible", "gummy", "gummies", "chocolate", "drink", "beverage",
+    "flower", "bud", "preroll", "pre-roll", "joint", "cartridge", "cart",
+    "vape", "disposable", "concentrate", "rosin", "dab", "wax",
+    "topical", "balm", "cream", "pipe", "paper", "rolling",
+    "sativa", "indica", "hybrid", "cheap", "under $", "best",
+    "paraphernalia", "accessories", "accessory",
+    "what's good", "whats good", "what do you got", "in stock",
+    "menu", "buy", "purchase", "price",
+]
+
+
+def _is_product_query(query: str) -> bool:
+    """Detect if the user query is product-related and should trigger the product tool."""
+    query_lower = query.lower()
+    return any(kw in query_lower for kw in _PRODUCT_TRIGGER_KEYWORDS)
+
+
 async def run_persona_chat(
     query: str,
     persona_id: str,
@@ -78,6 +98,9 @@ async def run_persona_chat(
 
     Uses the persona's system prompt with RAG-retrieved FAQ context,
     calling OpenAI directly for simplicity and isolation.
+
+    When the user asks a product-related question, the product_tool is
+    invoked to supply real inventory data to the LLM.
     """
     persona = load_persona(persona_id)
     if persona is None:
@@ -90,6 +113,22 @@ async def run_persona_chat(
         system_prompt += (
             "\n\n### RETRIEVED FAQ CONTEXT (use this to answer when relevant):\n"
             + faq_context
+        )
+
+    # Product tool call: if user asks about products, search inventory
+    product_context = ""
+    if _is_product_query(query):
+        from product_tool import run_product_tool_call
+        product_context = run_product_tool_call(query)
+        print(f"[PersonaAgent] Product tool triggered for query: {query[:60]}...")
+
+    if product_context:
+        system_prompt += (
+            "\n\n### AVAILABLE PRODUCTS IN STORE (recommend ONLY from these):\n"
+            + product_context
+            + "\n\nIMPORTANT: Only recommend products listed above. "
+            "Do not invent products. Include the product name, price, and a brief "
+            "description of the vibe/effect when recommending."
         )
 
     messages: list[dict] = [{"role": "system", "content": system_prompt}]

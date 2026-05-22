@@ -235,6 +235,25 @@ async def serve_persona_v1(request: Request):
     )
 
 
+@app.get("/test-tool-call", response_class=HTMLResponse)
+async def serve_test_tool_call(request: Request):
+    """Serve the product store page with budtender chat widget."""
+    import json as _json
+    from product_tool import get_all_products
+    products = get_all_products()
+    persona = load_persona("budtender-v1")
+    return templates.TemplateResponse(
+        request=request,
+        name="test-tool-call.html",
+        context={
+            "products_json": _json.dumps(products),
+            "persona_id": "budtender-v1",
+            "persona_display_name": persona["display_name"] if persona else "Your Budtender",
+            "persona_greeting": persona["greeting"] if persona else "Hey! How can I help?",
+        },
+    )
+
+
 @app.post("/persona-chat", response_model=PersonaChatResponse)
 async def persona_chat_endpoint(request_body: PersonaChatRequest):
     """Chat endpoint for persona experiments. Isolated from the main /chat pipeline."""
