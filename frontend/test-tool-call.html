@@ -16,24 +16,6 @@
             background: #f9fafb;
         }
 
-        .store-header {
-            background: #1a1a2e;
-            color: white;
-            padding: 20px 30px;
-            text-align: center;
-        }
-
-        .store-header h1 {
-            margin: 0 0 4px;
-            font-size: 1.6em;
-        }
-
-        .store-header p {
-            margin: 0;
-            opacity: 0.7;
-            font-size: 0.9em;
-        }
-
         .category-nav {
             background: white;
             border-bottom: 1px solid #e5e7eb;
@@ -78,17 +60,25 @@
             transition: box-shadow 0.2s;
             display: flex;
             flex-direction: column;
+            height: 100%;
         }
 
         .product-card:hover {
             box-shadow: 0 4px 16px rgba(0,0,0,0.1);
         }
 
+        .product-card-wrapper {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
         .product-image {
             width: 100%;
             height: 180px;
-            object-fit: cover;
+            object-fit: contain;
             background: #f3f4f6;
+            padding: 8px;
         }
 
         .product-info {
@@ -162,10 +152,6 @@
             font-weight: 600;
         }
 
-        .product-card-wrapper {
-            position: relative;
-        }
-
         @media (max-width: 600px) {
             .product-grid {
                 grid-template-columns: repeat(2, 1fr);
@@ -185,14 +171,14 @@
 </head>
 
 <body>
-    <div class="store-header">
-        <h1>Green Leaf Dispensary</h1>
-        <p>Washington State Licensed Cannabis Retail</p>
-    </div>
 
     <div class="category-nav" id="category-nav"></div>
 
     <div class="product-grid" id="product-grid"></div>
+
+    <p style="text-align:center; color:#9ca3af; font-size:0.75em; padding:20px 16px 40px; margin:0;">
+        This page is for demonstration purposes only. No real products are being sold. All data is fictional.
+    </p>
 
     <!-- Chat Widget -->
     <div id="chat-widget-button" class="chat-widget-button">

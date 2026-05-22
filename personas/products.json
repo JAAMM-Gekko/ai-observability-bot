@@ -10,7 +10,7 @@
     "thc": "22.93%",
     "cbd": "0.18%",
     "strain_type": "Sativa",
-    "image": "https://images.unsplash.com/photo-1603909223429-69bb7101f420?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/acapulco_gold.jpeg",
     "description": "Classic sativa with uplifting, energetic effects. Earthy and sweet aroma."
   },
   {
@@ -24,7 +24,7 @@
     "thc": "17.86%",
     "cbd": "12.00%",
     "strain_type": "Sativa",
-    "image": "https://images.unsplash.com/photo-1603909223429-69bb7101f420?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/Alaskan_ThunderFuck.jpeg",
     "description": "Potent sativa known for its euphoric, creative buzz. Piney and citrus terps."
   },
   {
@@ -38,7 +38,7 @@
     "thc": "17.76%",
     "cbd": "0.24%",
     "strain_type": "Indica",
-    "image": "https://images.unsplash.com/photo-1587754780681-3e99562e29c3?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/HammerPreroll.jpeg",
     "description": "Heavy indica prerolls. Deep relaxation and couch-lock. Grape and lime flavor."
   },
   {
@@ -52,7 +52,7 @@
     "thc": "72.00%",
     "cbd": "13.00%",
     "strain_type": "Indica",
-    "image": "https://images.unsplash.com/photo-1625657799852-1e5b59ae4daa?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/HammerDistillateCartridge.jpeg",
     "description": "High-potency distillate cart. Smooth draw, deep indica body high."
   },
   {
@@ -66,7 +66,7 @@
     "thc": "75.00%",
     "cbd": "14.00%",
     "strain_type": "Indica",
-    "image": "https://images.unsplash.com/photo-1625657799852-1e5b59ae4daa?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/ammerMiniBarDisposableVape.jpeg",
     "description": "All-in-one disposable pen. No charging needed. Heavy indica relaxation."
   },
   {
@@ -80,7 +80,7 @@
     "thc": "68.50%",
     "cbd": "0.30%",
     "strain_type": "Hybrid",
-    "image": "https://images.unsplash.com/photo-1616690002498-633f8dfa0994?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/BlueDreamLiveRosin.jpeg",
     "description": "Solventless live rosin. Full-spectrum terps, balanced hybrid. Berry and haze flavor."
   },
   {
@@ -94,7 +94,7 @@
     "thc": "10mg per piece",
     "cbd": "0mg",
     "strain_type": "Hybrid",
-    "image": "https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/CosmicGummiesWatermelon.jpeg",
     "description": "Fruity watermelon gummies. Chill, floaty body high. Great for beginners at low dose."
   },
   {
@@ -108,7 +108,7 @@
     "thc": "100mg total",
     "cbd": "5mg",
     "strain_type": "Sativa",
-    "image": "https://images.unsplash.com/photo-1558642452-9d2a7deb7f62?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/Canna-LemonSparklingElixir.jpeg",
     "description": "Sparkling lemonade drink. Fast-acting, uplifting sativa buzz. Dose by the sip."
   },
   {
@@ -122,7 +122,7 @@
     "thc": "250mg",
     "cbd": "250mg",
     "strain_type": "N/A",
-    "image": "https://images.unsplash.com/photo-1608571423902-eed4a5ad8108?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/ReliefBalm.jpeg",
     "description": "Topical balm for localized application. Non-psychoactive. Lavender and eucalyptus."
   },
   {
@@ -136,7 +136,7 @@
     "thc": "N/A",
     "cbd": "N/A",
     "strain_type": "N/A",
-    "image": "https://images.unsplash.com/photo-1575425186775-b8de9a427e67?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/GlassSpoonPipe.jpeg",
     "description": "Hand-blown borosilicate glass pipe. Compact, durable, easy to clean."
   },
   {
@@ -150,7 +150,7 @@
     "thc": "N/A",
     "cbd": "N/A",
     "strain_type": "N/A",
-    "image": "https://images.unsplash.com/photo-1587754780681-3e99562e29c3?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/RAWClassicRollingPapersKingSize.jpeg",
     "description": "Unbleached, unrefined rolling papers. Thin, even burn. Classic choice."
   },
   {
@@ -164,7 +164,7 @@
     "thc": "200mg total (20x10mg)",
     "cbd": "0mg",
     "strain_type": "Indica",
-    "image": "https://images.unsplash.com/photo-1606312619070-d48b4c652a52?w=200&h=200&fit=crop",
+    "image": "/static/demo-images/DarkChocolateBar.jpeg",
     "description": "Rich dark chocolate squares. Each piece is 10mg. Relaxing indica lean. Great for evening."
   }
 ]
