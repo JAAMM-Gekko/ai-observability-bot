@@ -194,8 +194,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') sendMessage();
     });
 
-    // Resize handle: drag top-left corner to expand/shrink
+    // Widget open/close toggle (only applies when floating button exists)
     const chatContainer = document.getElementById('chat-container');
+    const chatWidgetButton = document.getElementById('chat-widget-button');
+    const closeButton = document.getElementById('close-button');
+
+    if (chatWidgetButton) {
+        chatWidgetButton.addEventListener('click', () => {
+            chatContainer.classList.remove('chat-container-closed');
+            chatContainer.classList.add('chat-container-open');
+            userInput.focus();
+        });
+    }
+
+    if (closeButton) {
+        closeButton.addEventListener('click', () => {
+            chatContainer.classList.remove('chat-container-open');
+            chatContainer.classList.add('chat-container-closed');
+        });
+    }
+
+    // Resize handle: drag top-left corner to expand/shrink
     const resizeHandle = document.getElementById('chat-resize-handle');
     if (resizeHandle) {
         let isResizing = false;
