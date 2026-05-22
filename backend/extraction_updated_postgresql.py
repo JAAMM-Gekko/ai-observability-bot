@@ -9,7 +9,7 @@ load_dotenv()
 
 DB_URL = "postgresql://chatbot:chatbot_password@localhost:5432/chatbot_db"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-TENANT_ID = "704bd8d9-2791-4f6b-ba69-7f7cf065ba88"
+TENANT_ID = "fe4cab94-a16e-4ff7-9c88-30188c4dec63"
 EXCEL_PATH = "/home/ubuntu/ai-observability-bot/Cannabis FAQ_expanded_claude_rewritten.xlsx"
 EMBEDDING_MODEL = "text-embedding-3-small"
 
