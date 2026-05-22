@@ -106,7 +106,11 @@ document.addEventListener('DOMContentLoaded', () => {
             messageDiv.classList.add('bot-message');
         }
 
-        messageDiv.textContent = text;
+        if (typeof window.setChatMessageContent === 'function') {
+            window.setChatMessageContent(messageDiv, text, sender);
+        } else {
+            messageDiv.textContent = text;
+        }
 
         if (sender === 'bot' && !skipPersist) {
             const wrapper = document.createElement('div');

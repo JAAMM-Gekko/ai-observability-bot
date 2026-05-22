@@ -137,7 +137,11 @@ document.addEventListener('DOMContentLoaded', () => {
             messageDiv.classList.add('system-message');
         }
 
-        messageDiv.textContent = text;
+        if (typeof window.setChatMessageContent === 'function') {
+            window.setChatMessageContent(messageDiv, text, sender);
+        } else {
+            messageDiv.textContent = text;
+        }
 
         /* Feedback "Was this helpful?" only for bot replies, not startup message or live agent messages */
         if (sender === 'bot') {

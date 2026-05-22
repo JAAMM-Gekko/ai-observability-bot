@@ -206,6 +206,75 @@ body {
     border-bottom-left-radius: 4px;
 }
 
+/* Markdown in assistant messages */
+.message.message-markdown {
+    line-height: 1.5;
+}
+
+.message.message-markdown p {
+    margin: 0 0 0.5em;
+}
+
+.message.message-markdown p:last-child {
+    margin-bottom: 0;
+}
+
+.message.message-markdown ul,
+.message.message-markdown ol {
+    margin: 0.35em 0 0.5em;
+    padding-left: 1.25em;
+}
+
+.message.message-markdown li {
+    margin: 0.2em 0;
+}
+
+.message.message-markdown code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.88em;
+    background: rgba(0, 0, 0, 0.06);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+}
+
+.message.message-markdown pre {
+    margin: 0.5em 0;
+    padding: 0.6em 0.75em;
+    background: rgba(0, 0, 0, 0.06);
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.85em;
+}
+
+.message.message-markdown pre code {
+    background: none;
+    padding: 0;
+}
+
+.message.message-markdown a {
+    color: var(--primary-color);
+    text-decoration: underline;
+}
+
+.message.message-markdown strong {
+    font-weight: 600;
+}
+
+.message.message-markdown h1,
+.message.message-markdown h2,
+.message.message-markdown h3 {
+    margin: 0.4em 0 0.25em;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.message.message-markdown blockquote {
+    margin: 0.35em 0;
+    padding-left: 0.75em;
+    border-left: 3px solid var(--border-color);
+    color: #555;
+}
+
 .agent-message {
     background-color: var(--agent-message-bg);
     color: var(--agent-text-color);
