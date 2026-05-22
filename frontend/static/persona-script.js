@@ -106,7 +106,11 @@ document.addEventListener('DOMContentLoaded', () => {
             messageDiv.classList.add('bot-message');
         }
 
-        messageDiv.textContent = text;
+        if (typeof window.setChatMessageContent === 'function') {
+            window.setChatMessageContent(messageDiv, text, sender);
+        } else {
+            messageDiv.textContent = text;
+        }
 
         if (sender === 'bot' && !skipPersist) {
             const wrapper = document.createElement('div');
@@ -189,6 +193,89 @@ document.addEventListener('DOMContentLoaded', () => {
     userInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') sendMessage();
     });
+
+    // Widget open/close toggle (only applies when floating button exists)
+    const chatContainer = document.getElementById('chat-container');
+    const chatWidgetButton = document.getElementById('chat-widget-button');
+    const closeButton = document.getElementById('close-button');
+
+    if (chatWidgetButton) {
+        chatWidgetButton.addEventListener('click', () => {
+            chatContainer.classList.remove('chat-container-closed');
+            chatContainer.classList.add('chat-container-open');
+            userInput.focus();
+        });
+    }
+
+    if (closeButton) {
+        closeButton.addEventListener('click', () => {
+            chatContainer.classList.remove('chat-container-open');
+            chatContainer.classList.add('chat-container-closed');
+        });
+    }
+
+    // Resize handle: drag top-left corner to expand/shrink
+    const resizeHandle = document.getElementById('chat-resize-handle');
+    if (resizeHandle) {
+        let isResizing = false;
+        let startX, startY, startWidth, startHeight;
+
+        resizeHandle.addEventListener('mousedown', initResize);
+        resizeHandle.addEventListener('touchstart', initResize, { passive: false });
+
+        function initResize(e) {
+            e.preventDefault();
+            isResizing = true;
+            chatContainer.classList.add('chat-resizing');
+
+            const point = e.touches ? e.touches[0] : e;
+            startX = point.clientX;
+            startY = point.clientY;
+
+            const rect = chatContainer.getBoundingClientRect();
+            startWidth = rect.width;
+            startHeight = rect.height;
+
+            document.addEventListener('mousemove', doResize);
+            document.addEventListener('mouseup', stopResize);
+            document.addEventListener('touchmove', doResize, { passive: false });
+            document.addEventListener('touchend', stopResize);
+        }
+
+        function doResize(e) {
+            if (!isResizing) return;
+            e.preventDefault();
+
+            const point = e.touches ? e.touches[0] : e;
+            const dx = startX - point.clientX;
+            const dy = startY - point.clientY;
+
+            const newWidth = Math.min(Math.max(startWidth + dx, 300), window.innerWidth - 20);
+            const newHeight = Math.min(Math.max(startHeight + dy, 350), window.innerHeight - 20);
+
+            chatContainer.style.width = newWidth + 'px';
+            chatContainer.style.height = newHeight + 'px';
+            chatContainer.style.maxWidth = newWidth + 'px';
+            chatContainer.style.maxHeight = newHeight + 'px';
+        }
+
+        function stopResize() {
+            isResizing = false;
+            chatContainer.classList.remove('chat-resizing');
+            document.removeEventListener('mousemove', doResize);
+            document.removeEventListener('mouseup', stopResize);
+            document.removeEventListener('touchmove', doResize);
+            document.removeEventListener('touchend', stopResize);
+        }
+    }
+
+    // Mobile: adjust layout when virtual keyboard opens/closes
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+            chatContainer.style.height = window.visualViewport.height + 'px';
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        });
+    }
 
     userInput.focus();
 });

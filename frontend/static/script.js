@@ -137,7 +137,11 @@ document.addEventListener('DOMContentLoaded', () => {
             messageDiv.classList.add('system-message');
         }
 
-        messageDiv.textContent = text;
+        if (typeof window.setChatMessageContent === 'function') {
+            window.setChatMessageContent(messageDiv, text, sender);
+        } else {
+            messageDiv.textContent = text;
+        }
 
         /* Feedback "Was this helpful?" only for bot replies, not startup message or live agent messages */
         if (sender === 'bot') {
@@ -368,8 +372,80 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /* No feedback on startup message – leave initial bot message as plain bubble */
 
+    // Resize handle: drag top-left corner to expand/shrink the widget
+    const resizeHandle = document.getElementById('chat-resize-handle');
+    if (resizeHandle) {
+        let isResizing = false;
+        let startX, startY, startWidth, startHeight, startRight, startBottom;
+
+        resizeHandle.addEventListener('mousedown', initResize);
+        resizeHandle.addEventListener('touchstart', initResize, { passive: false });
+
+        function initResize(e) {
+            e.preventDefault();
+            isResizing = true;
+            chatContainer.classList.add('chat-resizing');
+
+            const point = e.touches ? e.touches[0] : e;
+            startX = point.clientX;
+            startY = point.clientY;
+
+            const rect = chatContainer.getBoundingClientRect();
+            startWidth = rect.width;
+            startHeight = rect.height;
+            startRight = window.innerWidth - rect.right;
+            startBottom = window.innerHeight - rect.bottom;
+
+            document.addEventListener('mousemove', doResize);
+            document.addEventListener('mouseup', stopResize);
+            document.addEventListener('touchmove', doResize, { passive: false });
+            document.addEventListener('touchend', stopResize);
+        }
+
+        function doResize(e) {
+            if (!isResizing) return;
+            e.preventDefault();
+
+            const point = e.touches ? e.touches[0] : e;
+            const dx = startX - point.clientX;
+            const dy = startY - point.clientY;
+
+            const newWidth = Math.min(Math.max(startWidth + dx, 300), window.innerWidth - 40);
+            const newHeight = Math.min(Math.max(startHeight + dy, 350), window.innerHeight - 40);
+
+            chatContainer.style.width = newWidth + 'px';
+            chatContainer.style.height = newHeight + 'px';
+            chatContainer.style.maxWidth = newWidth + 'px';
+            chatContainer.style.maxHeight = newHeight + 'px';
+        }
+
+        function stopResize() {
+            isResizing = false;
+            chatContainer.classList.remove('chat-resizing');
+            document.removeEventListener('mousemove', doResize);
+            document.removeEventListener('mouseup', stopResize);
+            document.removeEventListener('touchmove', doResize);
+            document.removeEventListener('touchend', stopResize);
+        }
+    }
+
     // Expose mock feedback log for inspection/export (e.g. Splunk correlation)
     window.__feedbackLog = feedbackLog;
+
+    // Mobile: adjust layout when virtual keyboard opens/closes
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+            if (chatContainer.classList.contains('chat-container-open')) {
+                chatContainer.style.height = window.visualViewport.height + 'px';
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+            }
+        });
+        window.visualViewport.addEventListener('scroll', () => {
+            if (chatContainer.classList.contains('chat-container-open')) {
+                chatContainer.style.height = window.visualViewport.height + 'px';
+            }
+        });
+    }
 
     console.log('Chat widget initialized');
 });

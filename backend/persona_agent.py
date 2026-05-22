@@ -2,8 +2,8 @@
 Persona experiment agent module.
 
 Provides a self-contained chat function for persona experiments that reuses
-the existing RAG infrastructure (ChromaDB + embeddings) but applies a custom
-system prompt loaded from a persona config file.
+the existing RAG infrastructure (PostgreSQL + pgvector + OpenAI embeddings)
+but applies a custom system prompt loaded from a persona config file.
 """
 
 import json
@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Optional
 
 import openai
+
+from faq_vector_store import chunk_text_to_qa, embed_query, search_similar_chunks
 
 PERSONAS_DIR = Path(__file__).resolve().parent.parent / "personas"
 
@@ -39,30 +41,50 @@ def clear_persona_cache():
     _persona_cache.clear()
 
 
-def _retrieve_faq_context(query: str, top_k: int = 5) -> str:
-    """Retrieve relevant FAQ context from ChromaDB using the shared RAG components."""
-    from agent import _embedding_model, _chroma_collection, _setup_rag_system
+async def _retrieve_faq_context_async(query: str, top_k: int = 5) -> str:
+    """Retrieve relevant FAQ context from PostgreSQL using the shared RAG pool."""
+    from agent import _openai_async_rag, _pg_pool, _rag_tenant_id, _setup_rag_system_async
 
-    if _embedding_model is None or _chroma_collection is None:
-        _setup_rag_system()
+    if _pg_pool is None or _openai_async_rag is None:
+        await _setup_rag_system_async()
 
-    from agent import _embedding_model, _chroma_collection
-    if _embedding_model is None or _chroma_collection is None:
+    from agent import _openai_async_rag as oai, _pg_pool as pool, _rag_tenant_id as tid
+    if pool is None or oai is None:
         return ""
 
     try:
-        query_embedding = _embedding_model.encode(query).tolist()
-        results = _chroma_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-        )
-        documents = results.get("documents", [[]])[0]
-        if not documents:
+        qe = await embed_query(oai, query)
+        chunk_texts = await search_similar_chunks(pool, tid, qe, top_k=top_k)
+        if not chunk_texts:
             return ""
-        return "\n\n---\n\n".join(documents)
+        blocks = []
+        for chunk_text in chunk_texts:
+            q, a = chunk_text_to_qa(chunk_text)
+            blocks.append(f"Question: {q}\nAnswer: {a}")
+        return "\n\n---\n\n".join(blocks)
     except Exception as e:
         print(f"[PersonaAgent] RAG retrieval error: {e}")
         return ""
+
+
+_PRODUCT_TRIGGER_KEYWORDS = [
+    "product", "recommend", "suggestion", "what do you have",
+    "what's available", "what is available", "show me", "looking for",
+    "edible", "gummy", "gummies", "chocolate", "drink", "beverage",
+    "flower", "bud", "preroll", "pre-roll", "joint", "cartridge", "cart",
+    "vape", "disposable", "concentrate", "rosin", "dab", "wax",
+    "topical", "balm", "cream", "pipe", "paper", "rolling",
+    "sativa", "indica", "hybrid", "cheap", "under $", "best",
+    "paraphernalia", "accessories", "accessory",
+    "what's good", "whats good", "what do you got", "in stock",
+    "menu", "buy", "purchase", "price",
+]
+
+
+def _is_product_query(query: str) -> bool:
+    """Detect if the user query is product-related and should trigger the product tool."""
+    query_lower = query.lower()
+    return any(kw in query_lower for kw in _PRODUCT_TRIGGER_KEYWORDS)
 
 
 async def run_persona_chat(
@@ -76,18 +98,37 @@ async def run_persona_chat(
 
     Uses the persona's system prompt with RAG-retrieved FAQ context,
     calling OpenAI directly for simplicity and isolation.
+
+    When the user asks a product-related question, the product_tool is
+    invoked to supply real inventory data to the LLM.
     """
     persona = load_persona(persona_id)
     if persona is None:
         return f"Persona '{persona_id}' not found."
 
-    faq_context = _retrieve_faq_context(query)
+    faq_context = await _retrieve_faq_context_async(query)
 
     system_prompt = persona["system_prompt"]
     if faq_context:
         system_prompt += (
             "\n\n### RETRIEVED FAQ CONTEXT (use this to answer when relevant):\n"
             + faq_context
+        )
+
+    # Product tool call: if user asks about products, search inventory
+    product_context = ""
+    if _is_product_query(query):
+        from product_tool import run_product_tool_call
+        product_context = run_product_tool_call(query)
+        print(f"[PersonaAgent] Product tool triggered for query: {query[:60]}...")
+
+    if product_context:
+        system_prompt += (
+            "\n\n### AVAILABLE PRODUCTS IN STORE (recommend ONLY from these):\n"
+            + product_context
+            + "\n\nIMPORTANT: Only recommend products listed above. "
+            "Do not invent products. Include the product name, price, and a brief "
+            "description of the vibe/effect when recommending."
         )
 
     messages: list[dict] = [{"role": "system", "content": system_prompt}]

@@ -3,15 +3,29 @@
 import os
 import re
 import time
+import uuid
 from dotenv import load_dotenv
-import chromadb
+
+load_dotenv()
+
+import asyncpg
 import openai
+from openai import AsyncOpenAI
 from beeai_framework.backend.chat import ChatModel
 from beeai_framework.emitter.emitter import Emitter
 from beeai_framework.tools.tool import Tool
 from beeai_framework.workflows.agent import AgentWorkflow, AgentWorkflowInput
 from pydantic import BaseModel, Field
-from sentence_transformers import SentenceTransformer
+
+from faq_vector_store import (
+    RAG_OPENAI_EMBEDDING_MODEL,
+    chunk_text_to_qa,
+    count_chunks_for_tenant,
+    default_database_url,
+    default_tenant_id,
+    embed_query,
+    search_similar_chunks,
+)
 
 try:
     import openlit
@@ -31,10 +45,8 @@ except ImportError:
 # Disable tokenizer parallelism to avoid warnings and potential conflicts
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-load_dotenv()
-
 # Configuration - REPLACE THESE VALUES
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 # OTEL: use env so Docker can point to host (e.g. host.docker.internal:4328) or Splunk VM (10.0.0.249:4328)
 OTEL_ENDPOINT = os.getenv("OTEL_ENDPOINT", "http://localhost:4328").rstrip("/")
 SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "openai-sidecar-test")
@@ -135,10 +147,6 @@ openai.chat.completions.create = patched_create
 print("OpenAI SDK patched successfully")
 print("Sidecar is now listening...")
 
-# Configuration constants for the RAG system
-EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'
-CHROMA_PERSIST_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "my_chroma_db")
-CHROMA_COLLECTION_NAME = "company_faqs"
 FAQ_NO_RESULTS_SENTINEL = "No relevant information found in the FAQs."
 
 # Runtime policy toggles
@@ -154,9 +162,11 @@ SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
 CANNABIS_MEDICAL_SKILL_PATH = os.path.join(SKILLS_DIR, "cannabis-medical-safety", "SKILL.md")
 CONSTRAINTS_PATH = os.path.join(os.path.dirname(__file__), "constraints.md")
 
-# Global variables
-_embedding_model = None
-_chroma_collection = None
+# Global variables (RAG: PostgreSQL + pgvector + OpenAI embeddings)
+_pg_pool: asyncpg.Pool | None = None
+_openai_async_rag: AsyncOpenAI | None = None
+_rag_tenant_id: uuid.UUID = default_tenant_id()
+_cached_faq_chunk_count: int = 0
 _llm = None
 _faq_tool_instance = None
 
@@ -458,13 +468,14 @@ def test_span_export(tracer_provider, endpoint: str):
         return False
 
 
-def _setup_rag_system():
-    global _embedding_model, _chroma_collection, _llm, _faq_tool_instance
+async def _setup_rag_system_async() -> bool:
+    global _pg_pool, _openai_async_rag, _cached_faq_chunk_count, _rag_tenant_id
+    global _llm, _faq_tool_instance
     global _agent_workflow, _medical_agent_workflow
     global _tracer_provider, _tracer
     global _medical_skill_instructions, _constraints_config
 
-    if (_embedding_model and _chroma_collection and _llm and _faq_tool_instance and
+    if (_pg_pool and _openai_async_rag and _llm and _faq_tool_instance and
             _agent_workflow and _medical_agent_workflow and
             _medical_skill_instructions and _constraints_config):
         print("RAG system already set up.")
@@ -512,22 +523,22 @@ def _setup_rag_system():
         f"forbidden_terms={len(_constraints_config.get('forbidden_terms', []))}"
     )
 
-    try:
-        _embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-        print("Embedding model loaded.")
-    except Exception as e:
-        print(f"Error loading embedding model: {e}")
+    if not OPENAI_API_KEY:
+        print("OPENAI_API_KEY missing; cannot initialize RAG (OpenAI embeddings).")
         return False
 
     try:
-        chroma_client = chromadb.PersistentClient(path=CHROMA_PERSIST_PATH)
-        _chroma_collection = chroma_client.get_or_create_collection(name=CHROMA_COLLECTION_NAME)
-        print(f"ChromaDB collection '{CHROMA_COLLECTION_NAME}' ready with {_chroma_collection.count()} documents.")
-        print("CHROMA_PERSIST_PATH =", CHROMA_PERSIST_PATH)
-        print("CHROMA_COLLECTION_NAME =", CHROMA_COLLECTION_NAME)
-        print("CHROMA_DOC_COUNT =", _chroma_collection.count())
+        _openai_async_rag = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        dsn = default_database_url()
+        _pg_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=10)
+        _rag_tenant_id = default_tenant_id()
+        _cached_faq_chunk_count = await count_chunks_for_tenant(_pg_pool, _rag_tenant_id)
+        print(
+            f"PostgreSQL RAG pool ready (dsn host implied); "
+            f"FAQ chunk count={_cached_faq_chunk_count} tenant={_rag_tenant_id}"
+        )
     except Exception as e:
-        print(f"Error connecting to ChromaDB: {e}")
+        print(f"Error connecting to PostgreSQL for RAG: {e}")
         return False
 
     try:
@@ -537,7 +548,7 @@ def _setup_rag_system():
         print(f"Error initializing LLM: {e}")
         return False
 
-    _faq_tool_instance = FAQTool(embedding_model=_embedding_model, chroma_collection=_chroma_collection)
+    _faq_tool_instance = FAQTool()
     print("FAQTool instance created.")
 
     # --- Retail/FAQ workflow ---
@@ -608,10 +619,23 @@ class FAQTool(Tool):
     def _create_emitter(self) -> Emitter | None:
         return Emitter()
 
-    def __init__(self, embedding_model: SentenceTransformer, chroma_collection: chromadb.Collection):
+    def __init__(self):
         super().__init__()
-        self.embedding_model = embedding_model
-        self.chroma_collection = chroma_collection
+
+    async def _pg_retrieve_contexts(self, query: str) -> tuple[list[str], str | None]:
+        """Returns (retrieved_context lines, error_message or None)."""
+        if not _pg_pool or not _openai_async_rag:
+            return [], "RAG vector store not initialized"
+        try:
+            query_embedding = await embed_query(_openai_async_rag, query)
+            chunk_texts = await search_similar_chunks(_pg_pool, _rag_tenant_id, query_embedding, top_k=3)
+            contexts: list[str] = []
+            for chunk_text in chunk_texts:
+                question, answer = chunk_text_to_qa(chunk_text)
+                contexts.append(f"Question: {question}\nAnswer: {answer}")
+            return contexts, None
+        except Exception as e:
+            return [], str(e)
 
     async def _run(self, query: str) -> str:
         if _tracer:
@@ -623,39 +647,20 @@ class FAQTool(Tool):
 
                 try:
                     with _tracer.start_as_current_span("query_embedding") as embedding_span:
-                        embedding_span.set_attribute("embedding.model", "sentence-transformers")
-                        embedding_span.set_attribute("embedding.model_name", "all-MiniLM-L6-v2")
-
-                        query_embedding = self.embedding_model.encode(query).tolist()
-                        embedding_span.set_attribute("embedding.vector_size", len(query_embedding))
+                        embedding_span.set_attribute("embedding.model", "openai")
+                        embedding_span.set_attribute("embedding.model_name", RAG_OPENAI_EMBEDDING_MODEL)
+                        retrieved_contexts, err = await self._pg_retrieve_contexts(query)
+                        if err:
+                            embedding_span.set_attribute("embedding.success", False)
+                            raise RuntimeError(err)
                         embedding_span.set_attribute("embedding.success", True)
 
-                    with _tracer.start_as_current_span("chroma_search") as search_span:
-                        search_span.set_attribute("chroma.collection", CHROMA_COLLECTION_NAME)
-                        search_span.set_attribute("chroma.n_results", 3)
-
-                        results = self.chroma_collection.query(
-                            query_embeddings=[query_embedding],
-                            n_results=3,
-                            include=['documents', 'metadatas']
-                        )
-
-                        search_span.set_attribute(
-                            "chroma.results_count",
-                            len(results.get('documents', [[]])[0]) if results and results.get('documents') else 0
-                        )
-                        search_span.set_attribute("chroma.search_success", True)
+                    with _tracer.start_as_current_span("pgvector_search") as search_span:
+                        search_span.set_attribute("pgvector.n_results", 3)
+                        search_span.set_attribute("pgvector.results_count", len(retrieved_contexts))
+                        search_span.set_attribute("pgvector.search_success", True)
 
                     with _tracer.start_as_current_span("result_processing") as process_span:
-                        retrieved_contexts = []
-                        if results and results.get('documents') and results['documents'][0]:
-                            for i in range(len(results['documents'][0])):
-                                doc_content = results['documents'][0][i]
-                                metadata = results['metadatas'][0][i]
-                                question = metadata.get('question', 'N/A')
-                                answer = metadata.get('answer', doc_content)
-                                retrieved_contexts.append(f"Question: {question}\nAnswer: {answer}")
-
                         process_span.set_attribute("processing.contexts_count", len(retrieved_contexts))
                         process_span.set_attribute("processing.success", True)
 
@@ -668,43 +673,21 @@ class FAQTool(Tool):
                     span.set_attribute("faq.results_found", True)
                     span.set_attribute("faq.status", "success")
                     span.set_attribute("faq.response_length", len(context_string))
-
                     return context_string
 
                 except Exception as e:
                     span.set_attribute("faq.status", "error")
                     span.set_attribute("error.message", str(e))
                     span.set_attribute("error.type", type(e).__name__)
-
                     print(f"Error in FAQ tool execution: {e}")
                     return f"Error processing query for FAQ lookup: {e}"
-        else:
-            try:
-                query_embedding = self.embedding_model.encode(query).tolist()
 
-                results = self.chroma_collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=3,
-                    include=['documents', 'metadatas']
-                )
-
-                retrieved_contexts = []
-                if results and results.get('documents') and results['documents'][0]:
-                    for i in range(len(results['documents'][0])):
-                        doc_content = results['documents'][0][i]
-                        metadata = results['metadatas'][0][i]
-                        question = metadata.get('question', 'N/A')
-                        answer = metadata.get('answer', doc_content)
-                        retrieved_contexts.append(f"Question: {question}\nAnswer: {answer}")
-
-                if not retrieved_contexts:
-                    return "No relevant information found in the FAQs."
-
-                context_string = "\n\n".join(retrieved_contexts)
-                return context_string
-
-            except Exception as e:
-                return f"Error processing query for FAQ lookup: {e}"
+        retrieved_contexts, err = await self._pg_retrieve_contexts(query)
+        if err:
+            return f"Error processing query for FAQ lookup: {err}"
+        if not retrieved_contexts:
+            return "No relevant information found in the FAQs."
+        return "\n\n".join(retrieved_contexts)
 
 
 def _is_retrieved_info_usable(retrieved_info: str) -> tuple[bool, str]:
@@ -728,13 +711,31 @@ def _build_retail_fallback_prompt(
 ) -> str:
     context_block = f"\n\nConversation context:\n{routing_context}" if routing_context else ""
 
+    product_ctx = ""
+    try:
+        from product_tool import run_product_tool_call
+        from persona_agent import _is_product_query
+        if _is_product_query(user_query):
+            product_data = run_product_tool_call(user_query)
+            product_ctx = (
+                "\n\n### AVAILABLE PRODUCTS IN STORE (recommend ONLY from these):\n"
+                + product_data
+                + "\n\nIMPORTANT: Only recommend products listed above. "
+                "Do not invent products. Include the product name, price, and a brief "
+                "description of the vibe/effect when recommending."
+            )
+            print(f"[ProductTool] Injected product context (fallback) for query: {user_query[:60]}...")
+    except Exception as e:
+        print(f"[ProductTool] Fallback error (non-fatal): {e}")
+
     return (
         "You are a Washington cannabis retail compliance assistant.\n"
         "No suitable answer was found in the store FAQ database for this question.\n"
         "Answer using general model knowledge while staying conservative and compliant.\n"
         "If uncertain, acknowledge uncertainty and avoid fabricating store-specific facts.\n"
         "Do NOT provide medical advice, dosage guidance, or therapeutic claims."
-        f"{context_block}\n\n"
+        f"{context_block}"
+        f"{product_ctx}\n\n"
         f"User Question: {user_query}"
     )
 
@@ -960,11 +961,30 @@ async def run_retail_with_constraints(
 
 
 def _build_faq_prompt(retrieved_info: str, user_query: str, routing_context: str = "") -> str:
-    """Assemble the final prompt with optional compact routing context."""
+    """Assemble the final prompt with optional compact routing context and product data."""
     ctx = f"\n\n{routing_context}\n" if routing_context else ""
+
+    product_ctx = ""
+    try:
+        from product_tool import run_product_tool_call
+        from persona_agent import _is_product_query
+        if _is_product_query(user_query):
+            product_data = run_product_tool_call(user_query)
+            product_ctx = (
+                "\n\n### AVAILABLE PRODUCTS IN STORE (recommend ONLY from these):\n"
+                + product_data
+                + "\n\nIMPORTANT: Only recommend products listed above. "
+                "Do not invent products. Include the product name, price, and a brief "
+                "description of the vibe/effect when recommending."
+            )
+            print(f"[ProductTool] Injected product context for query: {user_query[:60]}...")
+    except Exception as e:
+        print(f"[ProductTool] Error (non-fatal): {e}")
+
     return (
         f"Retrieved Company FAQ Information:\n{retrieved_info}"
         f"{ctx}"
+        f"{product_ctx}"
         f"\n\nUser Question: {user_query}"
     )
 
@@ -999,7 +1019,7 @@ async def run_faq_agent(
 
             try:
                 with _tracer.start_as_current_span("rag_system_setup") as setup_span:
-                    if not _setup_rag_system():
+                    if not await _setup_rag_system_async():
                         setup_span.set_attribute("setup.status", "failed")
                         span.set_attribute("workflow.status", "setup_failed")
                         return "Backend RAG system failed to initialize. Please check server logs."
@@ -1065,7 +1085,7 @@ async def run_faq_agent(
                 return f"An error occurred while processing your request: {e}"
 
     # === No tracer path ===
-    if not _setup_rag_system():
+    if not await _setup_rag_system_async():
         return "Backend RAG system failed to initialize. Please check server logs."
 
     use_medical_skill = await _classify_intent(user_query, routing_context)
@@ -1094,8 +1114,8 @@ async def run_faq_agent(
 def get_observability_data() -> dict:
     return {
         "rag_system": {
-            "embedding_model_loaded": _embedding_model is not None,
-            "chroma_collection_ready": _chroma_collection is not None,
+            "postgres_pool_ready": _pg_pool is not None,
+            "openai_embedding_client_ready": _openai_async_rag is not None,
             "llm_initialized": _llm is not None,
             "faq_tool_ready": _faq_tool_instance is not None,
             "agent_workflow_ready": _agent_workflow is not None,
@@ -1107,14 +1127,15 @@ def get_observability_data() -> dict:
             "tracer_provider_ready": _tracer_provider is not None,
             "tracer_ready": _tracer is not None
         },
-        "chroma_db": {
-            "collection_name": CHROMA_COLLECTION_NAME,
-            "document_count": _chroma_collection.count() if _chroma_collection else 0,
-            "persist_path": CHROMA_PERSIST_PATH
+        "vector_store": {
+            "backend": "postgresql_pgvector",
+            "tenant_id": str(_rag_tenant_id),
+            "faq_chunk_count": _cached_faq_chunk_count,
         },
         "embedding_model": {
-            "name": EMBEDDING_MODEL_NAME,
-            "loaded": _embedding_model is not None
+            "name": RAG_OPENAI_EMBEDDING_MODEL,
+            "provider": "openai",
+            "loaded": _openai_async_rag is not None,
         },
         "routing_models": {
             "s6_model": S6_MODEL,
@@ -1128,7 +1149,7 @@ def get_observability_data() -> dict:
             "forbidden_terms": len((_constraints_config or {}).get("forbidden_terms", [])),
         },
         "status": "ready" if all([
-            _embedding_model, _chroma_collection, _llm,
+            _pg_pool, _openai_async_rag, _llm,
             _faq_tool_instance, _agent_workflow,
             _medical_skill_instructions, _constraints_config
         ]) else "initializing"

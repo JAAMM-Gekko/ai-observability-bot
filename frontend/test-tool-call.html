@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Green Leaf Dispensary | Shop</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f9fafb;
+        }
+
+        .category-nav {
+            background: white;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 12px 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+        }
+
+        .category-btn {
+            padding: 6px 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 20px;
+            background: white;
+            cursor: pointer;
+            font-size: 0.82em;
+            transition: all 0.15s;
+        }
+
+        .category-btn:hover,
+        .category-btn.active {
+            background: #1a1a2e;
+            color: white;
+            border-color: #1a1a2e;
+        }
+
+        .product-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 20px;
+            padding: 24px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .product-card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            overflow: hidden;
+            transition: box-shadow 0.2s;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .product-card:hover {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+        }
+
+        .product-card-wrapper {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .product-image {
+            width: 100%;
+            height: 180px;
+            object-fit: contain;
+            background: #f3f4f6;
+            padding: 8px;
+        }
+
+        .product-info {
+            padding: 14px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .product-name {
+            font-size: 0.9em;
+            font-weight: 600;
+            margin: 0 0 6px;
+            color: #111;
+        }
+
+        .product-brand {
+            font-size: 0.78em;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+
+        .product-meta {
+            font-size: 0.75em;
+            color: #374151;
+            margin-bottom: 4px;
+        }
+
+        .product-strain {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.72em;
+            font-weight: 500;
+            margin-top: 6px;
+        }
+
+        .strain-sativa { background: #dcfce7; color: #166534; }
+        .strain-indica { background: #ede9fe; color: #5b21b6; }
+        .strain-hybrid { background: #fef3c7; color: #92400e; }
+
+        .product-price {
+            margin-top: auto;
+            padding-top: 10px;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+
+        .price-current {
+            font-size: 1.1em;
+            font-weight: 700;
+            color: #111;
+        }
+
+        .price-original {
+            font-size: 0.82em;
+            color: #9ca3af;
+            text-decoration: line-through;
+        }
+
+        .discount-badge {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: #111;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 0.7em;
+            font-weight: 600;
+        }
+
+        @media (max-width: 600px) {
+            .product-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 12px;
+                padding: 12px;
+            }
+
+            .product-image {
+                height: 140px;
+            }
+
+            .product-info {
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="category-nav" id="category-nav"></div>
+
+    <div class="product-grid" id="product-grid"></div>
+
+    <p style="text-align:center; color:#9ca3af; font-size:0.75em; padding:20px 16px 40px; margin:0;">
+        This page is for demonstration purposes only. No real products are being sold. All data is fictional.
+    </p>
+
+    <!-- Chat Widget -->
+    <div id="chat-widget-button" class="chat-widget-button">
+        <i class="fas fa-comment-dots"></i>
+    </div>
+
+    <div class="chat-container chat-container-closed" id="chat-container">
+        <div class="chat-resize-handle" id="chat-resize-handle" title="Drag to resize"></div>
+        <div class="chat-header">
+            <div>
+                <h3>Your Budtender</h3>
+            </div>
+            <button id="close-button" class="close-button">&times;</button>
+        </div>
+        <div class="chat-history" id="chat-history">
+            <div class="message bot-message">Hey! Welcome in. I can help you find the right product — just ask me what you're looking for or tell me the vibe you want.</div>
+        </div>
+        <div id="typing-indicator" class="typing-indicator" style="display: none;">
+            <span></span><span></span><span></span>
+        </div>
+        <div class="chat-input-area">
+            <input type="text" id="user-input" placeholder="Ask me anything..." autocomplete="off">
+            <button id="send-button">Send</button>
+        </div>
+        <div class="loading-indicator" id="loading-indicator" style="display: none;">Thinking...</div>
+    </div>
+
+    <script>
+        // Product data (loaded from server-rendered JSON)
+        const PRODUCTS = {{ products_json | safe }};
+
+        // Render category nav
+        const categories = ['All', ...new Set(PRODUCTS.map(p => p.category))];
+        const categoryNav = document.getElementById('category-nav');
+        categories.forEach(cat => {
+            const btn = document.createElement('button');
+            btn.className = 'category-btn' + (cat === 'All' ? ' active' : '');
+            btn.textContent = cat;
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                renderProducts(cat === 'All' ? null : cat);
+            });
+            categoryNav.appendChild(btn);
+        });
+
+        // Render product grid
+        function renderProducts(filterCategory) {
+            const grid = document.getElementById('product-grid');
+            grid.innerHTML = '';
+            const filtered = filterCategory
+                ? PRODUCTS.filter(p => p.category === filterCategory)
+                : PRODUCTS;
+
+            filtered.forEach(product => {
+                const discount = Math.round((1 - product.price / product.original_price) * 100);
+                const strainClass = product.strain_type === 'N/A' ? '' :
+                    `strain-${product.strain_type.toLowerCase()}`;
+
+                grid.innerHTML += `
+                    <div class="product-card-wrapper">
+                        ${discount > 0 ? `<span class="discount-badge">${discount}% Off</span>` : ''}
+                        <div class="product-card">
+                            <img class="product-image" src="${product.image}" alt="${product.name}" loading="lazy">
+                            <div class="product-info">
+                                <div class="product-name">${product.name}</div>
+                                <div class="product-brand">${product.brand}</div>
+                                <div class="product-meta">THC: ${product.thc} | ${product.weight}</div>
+                                ${product.strain_type !== 'N/A' ? `<span class="product-strain ${strainClass}">${product.strain_type}</span>` : ''}
+                                <div class="product-price">
+                                    <span class="price-current">$${product.price.toFixed(2)}</span>
+                                    <span class="price-original">$${product.original_price.toFixed(2)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        renderProducts(null);
+    </script>
+
+    <script>
+        window.PERSONA_ID = "budtender-v1";
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
+    <script src="/static/markdown-render.js"></script>
+    <script src="/static/persona-script.js"></script>
+</body>
+
+</html>

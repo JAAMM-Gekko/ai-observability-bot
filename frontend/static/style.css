@@ -66,7 +66,9 @@ body {
     bottom: 100px;
     right: 30px;
     width: 380px;
-    height: 500px; /* Fixed height */
+    max-width: calc(100vw - 40px);
+    height: 500px;
+    max-height: calc(100vh - 130px);
     background-color: var(--container-bg);
     border-radius: 12px;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
@@ -86,6 +88,39 @@ body {
     transform: scale(1);
     opacity: 1;
     pointer-events: auto;
+}
+
+/* Resize handle (top-left corner) */
+.chat-resize-handle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 20px;
+    height: 20px;
+    cursor: nwse-resize;
+    z-index: 10;
+}
+
+.chat-resize-handle::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 10px;
+    height: 10px;
+    border-top: 2px solid #bbb;
+    border-left: 2px solid #bbb;
+    border-radius: 2px 0 0 0;
+    transition: border-color 0.15s;
+}
+
+.chat-resize-handle:hover::before {
+    border-color: var(--primary-color);
+}
+
+.chat-container.chat-resizing {
+    transition: none;
+    user-select: none;
 }
 
 .chat-container.chat-container-closed {
@@ -169,7 +204,8 @@ body {
 }
 
 .chat-history {
-    flex-grow: 1;
+    flex: 1 1 0;
+    min-height: 0;
     overflow-y: auto;
     border: 1px solid var(--border-color);
     border-radius: 8px;
@@ -179,7 +215,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    height: 350px; /* Fixed height for chat history */
+    -webkit-overflow-scrolling: touch;
 }
 
 /* Message Bubbles */
@@ -204,6 +240,75 @@ body {
     color: var(--bot-text-color);
     align-self: flex-start;
     border-bottom-left-radius: 4px;
+}
+
+/* Markdown in assistant messages */
+.message.message-markdown {
+    line-height: 1.5;
+}
+
+.message.message-markdown p {
+    margin: 0 0 0.5em;
+}
+
+.message.message-markdown p:last-child {
+    margin-bottom: 0;
+}
+
+.message.message-markdown ul,
+.message.message-markdown ol {
+    margin: 0.35em 0 0.5em;
+    padding-left: 1.25em;
+}
+
+.message.message-markdown li {
+    margin: 0.2em 0;
+}
+
+.message.message-markdown code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.88em;
+    background: rgba(0, 0, 0, 0.06);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+}
+
+.message.message-markdown pre {
+    margin: 0.5em 0;
+    padding: 0.6em 0.75em;
+    background: rgba(0, 0, 0, 0.06);
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.85em;
+}
+
+.message.message-markdown pre code {
+    background: none;
+    padding: 0;
+}
+
+.message.message-markdown a {
+    color: var(--primary-color);
+    text-decoration: underline;
+}
+
+.message.message-markdown strong {
+    font-weight: 600;
+}
+
+.message.message-markdown h1,
+.message.message-markdown h2,
+.message.message-markdown h3 {
+    margin: 0.4em 0 0.25em;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.message.message-markdown blockquote {
+    margin: 0.35em 0;
+    padding-left: 0.75em;
+    border-left: 3px solid var(--border-color);
+    color: #555;
 }
 
 .agent-message {
@@ -328,12 +433,14 @@ body {
 
 #user-input {
     flex-grow: 1;
+    min-width: 0;
     padding: 10px 15px;
     border: 1px solid var(--border-color);
     border-radius: 20px;
-    font-size: 0.9em;
+    font-size: 16px; /* prevent iOS zoom on focus */
     outline: none;
     transition: border-color 0.2s;
+    -webkit-appearance: none;
 }
 
 #user-input:focus {
@@ -346,9 +453,11 @@ body {
     border: none;
     border-radius: 20px;
     padding: 10px 20px;
+    min-height: 44px;
     cursor: pointer;
     font-size: 0.9em;
     transition: background-color 0.2s;
+    flex-shrink: 0;
 }
 
 #send-button:hover {
@@ -368,16 +477,98 @@ body {
     font-size: 0.85em;
 }
 
-/* Responsive adjustments */
-@media (max-width: 500px) {
+/* Responsive: tablets */
+@media (max-width: 768px) {
     .chat-container {
-        width: 90%;
-        bottom: 20px;
-        right: 5%;
-        max-height: 70vh;
+        width: 360px;
+        max-width: calc(100vw - 30px);
+        height: 480px;
+        max-height: calc(100vh - 120px);
+        bottom: 80px;
+        right: 15px;
+        padding: 16px;
     }
+}
+
+/* Responsive: phones */
+@media (max-width: 500px) {
     .chat-widget-button {
-        bottom: 20px;
-        right: 20px;
+        bottom: 16px;
+        right: 16px;
+        width: 52px;
+        height: 52px;
+        font-size: 20px;
+    }
+
+    .chat-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        max-width: 100%;
+        height: 100%;
+        max-height: 100%;
+        border-radius: 0;
+        padding: 12px;
+        padding-top: env(safe-area-inset-top, 12px);
+        padding-bottom: env(safe-area-inset-bottom, 12px);
+    }
+
+    .chat-header h3 {
+        font-size: 1.05em;
+    }
+
+    .close-button {
+        font-size: 1.8em;
+        padding: 4px 8px;
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .chat-input-area {
+        gap: 6px;
+        margin-top: 8px;
+    }
+
+    #user-input {
+        padding: 12px 14px;
+    }
+
+    #send-button {
+        padding: 12px 16px;
+    }
+
+    .message {
+        max-width: 88%;
+        font-size: 0.88em;
+    }
+
+    .assistant-message-wrapper {
+        max-width: 88%;
+    }
+
+    .message-feedback .feedback-btn {
+        padding: 6px 14px;
+        min-height: 36px;
+    }
+
+    .chat-resize-handle {
+        display: none;
+    }
+}
+
+/* Handle virtual keyboard on mobile (visualViewport-aware) */
+@media (max-width: 500px) and (max-height: 500px) {
+    .chat-container {
+        padding-bottom: 8px;
+    }
+
+    .chat-history {
+        margin-bottom: 6px;
     }
 }

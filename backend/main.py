@@ -25,7 +25,7 @@ try:
 except ImportError:
     BeeAIInstrumentor = None
 
-from agent import run_faq_agent, _setup_rag_system
+from agent import run_faq_agent, _setup_rag_system_async
 from sentiment_analyzer import SentimentAnalyzer, ConversationTracker, generate_conversation_summary
 from email_service import EmailService
 from guardrails_nemo import enforce_medical_output_guardrails
@@ -111,7 +111,7 @@ async def health_check():
         "status": "healthy" if obs_data.get("status") == "ready" else "initializing",
         "service": "ai-observability-bot",
         "rag_system": obs_data.get("rag_system", {}),
-        "chroma_db": obs_data.get("chroma_db", {})
+        "vector_store": obs_data.get("vector_store", {})
     }
 
 
@@ -161,7 +161,7 @@ async def _agent_wait_timeout_task():
 async def startup_event():
     """Initializes the RAG system when the FastAPI app starts up."""
     print("FastAPI startup event: Initializing RAG system...")
-    success = _setup_rag_system()
+    success = await _setup_rag_system_async()
     if not success:
         print("RAG system initialization failed during startup.")
     else:
@@ -231,6 +231,25 @@ async def serve_persona_v1(request: Request):
             "persona_id": "budtender-v1",
             "persona_display_name": persona["display_name"] if persona else "Chat",
             "persona_greeting": persona["greeting"] if persona else "Hi! How can I help?",
+        },
+    )
+
+
+@app.get("/test-tool-call", response_class=HTMLResponse)
+async def serve_test_tool_call(request: Request):
+    """Serve the product store page with budtender chat widget."""
+    import json as _json
+    from product_tool import get_all_products
+    products = get_all_products()
+    persona = load_persona("budtender-v1")
+    return templates.TemplateResponse(
+        request=request,
+        name="test-tool-call.html",
+        context={
+            "products_json": _json.dumps(products),
+            "persona_id": "budtender-v1",
+            "persona_display_name": persona["display_name"] if persona else "Your Budtender",
+            "persona_greeting": persona["greeting"] if persona else "Hey! How can I help?",
         },
     )
 

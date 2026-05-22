@@ -11,6 +11,7 @@
         body {
             margin: 0;
             min-height: 100vh;
+            min-height: 100dvh;
             background: #f4f7f6;
             display: flex;
             align-items: center;
@@ -24,16 +25,36 @@
             opacity: 1 !important;
             transform: none !important;
             pointer-events: auto !important;
-            width: 400px;
+            width: 420px;
             max-width: 95vw;
-            height: 550px;
+            height: 600px;
             max-height: 90vh;
+            max-height: 90dvh;
+        }
+
+        @media (max-width: 500px) {
+            body {
+                align-items: stretch;
+            }
+
+            #chat-container {
+                width: 100% !important;
+                max-width: 100% !important;
+                height: 100vh !important;
+                height: 100dvh !important;
+                max-height: 100% !important;
+                border-radius: 0 !important;
+                padding: 12px !important;
+                padding-top: env(safe-area-inset-top, 12px) !important;
+                padding-bottom: env(safe-area-inset-bottom, 12px) !important;
+            }
         }
     </style>
 </head>
 
 <body>
     <div class="chat-container" id="chat-container">
+        <div class="chat-resize-handle" id="chat-resize-handle" title="Drag to resize"></div>
         <div class="chat-header">
             <div>
                 <h3>{{ persona_display_name }}</h3>
@@ -55,6 +76,9 @@
     <script>
         window.PERSONA_ID = "{{ persona_id }}";
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
+    <script src="/static/markdown-render.js"></script>
     <script src="/static/persona-script.js"></script>
 </body>
 
