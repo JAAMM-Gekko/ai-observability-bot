@@ -7,10 +7,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_URL = "postgresql://chatbot:chatbot_password@localhost:5432/chatbot_db"
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-TENANT_ID = "704bd8d9-2791-4f6b-ba69-7f7cf065ba88"
-EXCEL_PATH = "/home/ubuntu/ai-observability-bot/Cannabis FAQ_expanded_claude_rewritten.xlsx"
+DB_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://chatbot:chatbot_password@localhost:5432/chatbot_db",
+)
+OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
+TENANT_ID = os.getenv("RAG_TENANT_ID", "704bd8d9-2791-4f6b-ba69-7f7cf065ba88")
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+EXCEL_PATH = os.getenv(
+    "FAQ_EXCEL_PATH",
+    os.path.join(_repo_root, "Cannabis FAQ_expanded_claude_rewritten.xlsx"),
+)
 EMBEDDING_MODEL = "text-embedding-3-small"
 
 client = OpenAI(api_key=OPENAI_API_KEY)

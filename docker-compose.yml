@@ -8,20 +8,36 @@ services:
       - observability-net
     restart: unless-stopped
 
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ai-observability-postgres
+    environment:
+      POSTGRES_USER: chatbot
+      POSTGRES_PASSWORD: chatbot_password
+      POSTGRES_DB: chatbot_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - observability-net
+    restart: unless-stopped
+
   ai-observability-bot:
     build: .
     container_name: ai-observability-bot
     ports:
       - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql://chatbot:chatbot_password@postgres:5432/chatbot_db
     env_file:
       - .env
     networks:
       - observability-net
-    volumes:
-      - ./my_chroma_db:/app/my_chroma_db
     restart: unless-stopped
     depends_on:
       - otel-collector
+      - postgres
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
@@ -32,3 +48,6 @@ services:
 networks:
   observability-net:
     driver: bridge
+
+volumes:
+  postgres_data:

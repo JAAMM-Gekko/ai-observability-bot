@@ -25,7 +25,7 @@ try:
 except ImportError:
     BeeAIInstrumentor = None
 
-from agent import run_faq_agent, _setup_rag_system
+from agent import run_faq_agent, _setup_rag_system_async
 from sentiment_analyzer import SentimentAnalyzer, ConversationTracker, generate_conversation_summary
 from email_service import EmailService
 from guardrails_nemo import enforce_medical_output_guardrails
@@ -111,7 +111,7 @@ async def health_check():
         "status": "healthy" if obs_data.get("status") == "ready" else "initializing",
         "service": "ai-observability-bot",
         "rag_system": obs_data.get("rag_system", {}),
-        "chroma_db": obs_data.get("chroma_db", {})
+        "vector_store": obs_data.get("vector_store", {})
     }
 
 
@@ -161,7 +161,7 @@ async def _agent_wait_timeout_task():
 async def startup_event():
     """Initializes the RAG system when the FastAPI app starts up."""
     print("FastAPI startup event: Initializing RAG system...")
-    success = _setup_rag_system()
+    success = await _setup_rag_system_async()
     if not success:
         print("RAG system initialization failed during startup.")
     else:

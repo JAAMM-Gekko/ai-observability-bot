@@ -3,6 +3,7 @@ uvicorn[standard]
 python-dotenv
 jinja2
 beeai-framework
+asyncpg
 chromadb
 pandas
 sentence-transformers
