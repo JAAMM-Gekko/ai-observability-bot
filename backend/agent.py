@@ -750,8 +750,19 @@ def _check_response_constraints(
     query_norm = _normalize(user_query)
     if any(token in normalized for token in ["cure", "treat", "heals", "therapeutic", "medical benefit"]):
         violations.append("therapeutic_or_curative_claim")
-    if any(token in normalized for token in ["dosage", "mg ", "milligram", "take twice daily"]):
+
+    # Check for medical dosage advice, but allow product catalog THC/CBD specs
+    # (e.g. "10mg per piece", "250mg CBD") which are standard product info
+    dosage_terms = ["dosage", "milligram", "take twice daily"]
+    if any(term in normalized for term in dosage_terms):
         violations.append("medical_or_dosage_advice")
+    elif "mg " in normalized:
+        import re
+        # Only flag "mg" if it's in a dosing instruction context, not product specs
+        mg_contexts = re.findall(r'take\s+\d+\s*mg|dose.*\d+\s*mg|administer.*mg', normalized)
+        if mg_contexts:
+            violations.append("medical_or_dosage_advice")
+
     if "ignore" in query_norm and "rule" in query_norm:
         violations.append("prompt_injection_attempt")
     if is_s6:
