@@ -267,7 +267,9 @@ document.addEventListener('DOMContentLoaded', () => {
             addMessage(data.answer, 'bot');
 
             // Render product cards if returned
+            console.log('[ProductCards] Response cards:', data.cards);
             if (data.cards && data.cards.length > 0) {
+                console.log('[ProductCards] Rendering', data.cards.length, 'cards');
                 renderProductCards(data.cards);
             }
 
