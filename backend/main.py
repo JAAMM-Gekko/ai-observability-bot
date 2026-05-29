@@ -211,13 +211,56 @@ class PersonaChatRequest(BaseModel):
     session_id: str | None = None
 
 
+class ProductCard(BaseModel):
+    type: str = "product_card"
+    name: str
+    image: str
+    price: str
+    category: str = ""
+    description: str = ""
+
+
 class PersonaChatResponse(BaseModel):
     answer: str
     session_id: str
     persona_id: str
+    cards: list[ProductCard] = []
 
 
 _persona_sessions: dict[str, list[dict]] = {}
+
+
+def _extract_product_cards(answer: str, all_products: list[dict], max_cards: int = 3) -> list:
+    """Match product names mentioned in the LLM answer to actual product data."""
+    answer_lower = answer.lower()
+    matched = []
+    for product in all_products:
+        name_lower = product["name"].lower()
+        # Check if product name (or significant portion) appears in the answer
+        name_words = name_lower.split()
+        # Match if at least 2 consecutive words from the product name appear
+        if len(name_words) >= 2:
+            for i in range(len(name_words) - 1):
+                bigram = f"{name_words[i]} {name_words[i+1]}"
+                if bigram in answer_lower:
+                    matched.append(product)
+                    break
+        elif name_lower in answer_lower:
+            matched.append(product)
+
+        if len(matched) >= max_cards:
+            break
+
+    return [
+        ProductCard(
+            name=p["name"],
+            image=p["image"],
+            price=f"${p['price']:.2f}",
+            category=p.get("category", ""),
+            description=p.get("description", ""),
+        )
+        for p in matched
+    ]
 
 
 @app.get("/persona-v1", response_class=HTMLResponse)
@@ -257,6 +300,9 @@ async def serve_test_tool_call(request: Request):
 @app.post("/persona-chat", response_model=PersonaChatResponse)
 async def persona_chat_endpoint(request_body: PersonaChatRequest):
     """Chat endpoint for persona experiments. Isolated from the main /chat pipeline."""
+    from product_tool import get_all_products
+    from persona_agent import _is_product_query
+
     persona_id = request_body.persona_id
     user_query = request_body.query
     session_id = request_body.session_id or str(uuid.uuid4())
@@ -274,10 +320,16 @@ async def persona_chat_endpoint(request_body: PersonaChatRequest):
     history.append({"role": "assistant", "content": answer})
     _persona_sessions[session_id] = history
 
+    # Extract product cards if this was a product query
+    cards: list[ProductCard] = []
+    if _is_product_query(user_query):
+        cards = _extract_product_cards(answer, get_all_products())
+
     return PersonaChatResponse(
         answer=answer,
         session_id=session_id,
         persona_id=persona_id,
+        cards=cards,
     )
 
 
@@ -473,10 +525,23 @@ async def chat_endpoint(request_body: ChatRequest):
             print(f"[Sentiment] Error (non-fatal): {sentiment_err}")
         # --- end sentiment ---
 
+        # Extract product cards for the response
+        chat_cards = []
+        try:
+            from product_tool import get_all_products
+            from persona_agent import _is_product_query
+            if _is_product_query(user_query):
+                chat_cards = [
+                    c.model_dump() for c in _extract_product_cards(safe_answer, get_all_products())
+                ]
+        except Exception:
+            pass
+
         return ChatResponse(
             answer=safe_answer,
             session_id=session_id,
-            state=session.state
+            state=session.state,
+            cards=chat_cards,
         )
     except Exception as e:
         print(f"Error processing chat request: {e}")

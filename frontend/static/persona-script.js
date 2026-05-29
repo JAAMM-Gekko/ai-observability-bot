@@ -134,6 +134,28 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function renderProductCards(cards) {
+        const cardsContainer = document.createElement('div');
+        cardsContainer.className = 'chat-product-cards';
+
+        cards.forEach(card => {
+            const cardEl = document.createElement('div');
+            cardEl.className = 'chat-product-card';
+            cardEl.innerHTML = `
+                <img src="${card.image}" alt="${card.name}" loading="lazy">
+                <div class="chat-product-card-info">
+                    <div class="chat-product-card-name">${card.name}</div>
+                    <div class="chat-product-card-category">${card.category}</div>
+                    <div class="chat-product-card-price">${card.price}</div>
+                </div>
+            `;
+            cardsContainer.appendChild(cardEl);
+        });
+
+        chatHistory.appendChild(cardsContainer);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
+
     async function sendMessage() {
         const query = userInput.value.trim();
         if (query === '') return;
@@ -177,6 +199,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             addMessage(data.answer, 'bot');
+
+            // Render product cards if returned
+            if (data.cards && data.cards.length > 0) {
+                renderProductCards(data.cards);
+            }
         } catch (error) {
             console.error('Error sending message:', error);
             const msg = error.name === 'AbortError'

@@ -62,3 +62,4 @@ class ChatResponse(BaseModel):
     session_id: str
     state: SessionState
     agent_name: Optional[str] = None
+    cards: List[dict] = []
