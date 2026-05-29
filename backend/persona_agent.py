@@ -126,9 +126,14 @@ async def run_persona_chat(
         system_prompt += (
             "\n\n### AVAILABLE PRODUCTS IN STORE (recommend ONLY from these):\n"
             + product_context
-            + "\n\nIMPORTANT: Only recommend products listed above. "
-            "Do not invent products. Include the product name, price, and a brief "
-            "description of the vibe/effect when recommending."
+            + "\n\n### PRODUCT RECOMMENDATION RULES:\n"
+            "1. Only recommend products listed above. Do not invent products.\n"
+            "2. If the query is GENERAL (e.g. 'recommend me a vape', 'what edibles do you have'), "
+            "briefly introduce ALL matching products as a short list with name, price, and one-line vibe. "
+            "Then ask which one they'd like to know more about.\n"
+            "3. If the query is SPECIFIC (e.g. 'tell me about the Acapulco Gold'), "
+            "go into detail on that one product (vibe, format, who it's for).\n"
+            "4. Always use the EXACT product name as listed so it can be matched."
         )
 
     messages: list[dict] = [{"role": "system", "content": system_prompt}]

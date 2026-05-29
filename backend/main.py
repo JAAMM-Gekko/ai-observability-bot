@@ -231,20 +231,27 @@ _persona_sessions: dict[str, list[dict]] = {}
 
 
 def _extract_product_cards(answer: str, all_products: list[dict], max_cards: int = 3) -> list:
-    """Match product names mentioned in the LLM answer to actual product data."""
+    """Match product names mentioned in the LLM answer to actual product data.
+
+    Uses the first 2-3 distinctive words of the product name (skipping weight/size)
+    to avoid false positives from generic terms like 'hammer' or 'disposable'.
+    """
     answer_lower = answer.lower()
     matched = []
+
     for product in all_products:
-        name_lower = product["name"].lower()
-        # Check if product name (or significant portion) appears in the answer
-        name_words = name_lower.split()
-        # Match if at least 2 consecutive words from the product name appear
-        if len(name_words) >= 2:
-            for i in range(len(name_words) - 1):
-                bigram = f"{name_words[i]} {name_words[i+1]}"
-                if bigram in answer_lower:
-                    matched.append(product)
-                    break
+        name = product["name"]
+        # Extract the distinctive part of the name (drop trailing weight like "3.5g", "1g", "10pk 5g")
+        # We check if the core product identifier appears in the answer
+        name_lower = name.lower()
+
+        # Strategy: check if the full name (minus trailing weight) appears,
+        # or if a 3+ word core sequence from the name appears
+        import re
+        core = re.sub(r'\s*\d+(\.\d+)?\s*(g|mg|oz|pk|ml)\b.*$', '', name_lower, flags=re.IGNORECASE).strip()
+
+        if len(core) >= 4 and core in answer_lower:
+            matched.append(product)
         elif name_lower in answer_lower:
             matched.append(product)
 
