@@ -11,6 +11,25 @@ from pathlib import Path
 
 PRODUCTS_PATH = Path(__file__).resolve().parent.parent / "personas" / "products.json"
 
+_PRODUCT_TRIGGER_KEYWORDS = [
+    "product", "recommend", "suggestion", "what do you have",
+    "what's available", "what is available", "show me", "looking for",
+    "edible", "gummy", "gummies", "chocolate", "drink", "beverage",
+    "flower", "bud", "preroll", "pre-roll", "joint", "cartridge", "cart",
+    "vape", "disposable", "concentrate", "rosin", "dab", "wax",
+    "topical", "balm", "cream", "pipe", "paper", "rolling",
+    "sativa", "indica", "hybrid", "cheap", "under $", "best",
+    "paraphernalia", "accessories", "accessory",
+    "what's good", "whats good", "what do you got", "in stock",
+    "menu", "buy", "purchase", "price",
+]
+
+
+def is_product_query(query: str) -> bool:
+    """Detect if the user query is product-related and should trigger the product tool."""
+    query_lower = query.lower()
+    return any(kw in query_lower for kw in _PRODUCT_TRIGGER_KEYWORDS)
+
 _products: list[dict] | None = None
 
 

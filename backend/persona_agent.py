@@ -67,24 +67,7 @@ async def _retrieve_faq_context_async(query: str, top_k: int = 5) -> str:
         return ""
 
 
-_PRODUCT_TRIGGER_KEYWORDS = [
-    "product", "recommend", "suggestion", "what do you have",
-    "what's available", "what is available", "show me", "looking for",
-    "edible", "gummy", "gummies", "chocolate", "drink", "beverage",
-    "flower", "bud", "preroll", "pre-roll", "joint", "cartridge", "cart",
-    "vape", "disposable", "concentrate", "rosin", "dab", "wax",
-    "topical", "balm", "cream", "pipe", "paper", "rolling",
-    "sativa", "indica", "hybrid", "cheap", "under $", "best",
-    "paraphernalia", "accessories", "accessory",
-    "what's good", "whats good", "what do you got", "in stock",
-    "menu", "buy", "purchase", "price",
-]
-
-
-def _is_product_query(query: str) -> bool:
-    """Detect if the user query is product-related and should trigger the product tool."""
-    query_lower = query.lower()
-    return any(kw in query_lower for kw in _PRODUCT_TRIGGER_KEYWORDS)
+from product_tool import is_product_query as _is_product_query
 
 
 async def run_persona_chat(

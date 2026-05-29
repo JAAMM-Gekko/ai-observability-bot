@@ -753,13 +753,14 @@ def _check_response_constraints(
 
     # Check for medical dosage advice, but allow product catalog THC/CBD specs
     # (e.g. "10mg per piece", "250mg CBD") which are standard product info
-    dosage_terms = ["dosage", "milligram", "take twice daily"]
+    dosage_terms = ["take twice daily", "consult your doctor", "prescribed dose"]
     if any(term in normalized for term in dosage_terms):
         violations.append("medical_or_dosage_advice")
     elif "mg " in normalized:
         import re
-        # Only flag "mg" if it's in a dosing instruction context, not product specs
-        mg_contexts = re.findall(r'take\s+\d+\s*mg|dose.*\d+\s*mg|administer.*mg', normalized)
+        # Only flag "mg" when it's clearly a dosing INSTRUCTION (verb + amount)
+        # NOT product specs like "200mg THC" or "10mg per piece"
+        mg_contexts = re.findall(r'take\s+\d+\s*mg|administer\s+\d+\s*mg|start\s+with\s+\d+\s*mg', normalized)
         if mg_contexts:
             violations.append("medical_or_dosage_advice")
 

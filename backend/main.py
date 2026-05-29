@@ -307,8 +307,7 @@ async def serve_test_tool_call(request: Request):
 @app.post("/persona-chat", response_model=PersonaChatResponse)
 async def persona_chat_endpoint(request_body: PersonaChatRequest):
     """Chat endpoint for persona experiments. Isolated from the main /chat pipeline."""
-    from product_tool import get_all_products
-    from persona_agent import _is_product_query
+    from product_tool import get_all_products, is_product_query
 
     persona_id = request_body.persona_id
     user_query = request_body.query
@@ -329,7 +328,7 @@ async def persona_chat_endpoint(request_body: PersonaChatRequest):
 
     # Extract product cards if this was a product query
     cards: list[ProductCard] = []
-    if _is_product_query(user_query):
+    if is_product_query(user_query):
         cards = _extract_product_cards(answer, get_all_products())
 
     return PersonaChatResponse(
@@ -535,14 +534,15 @@ async def chat_endpoint(request_body: ChatRequest):
         # Extract product cards for the response
         chat_cards = []
         try:
-            from product_tool import get_all_products
-            from persona_agent import _is_product_query
-            if _is_product_query(user_query):
-                chat_cards = [
-                    c.model_dump() for c in _extract_product_cards(safe_answer, get_all_products())
-                ]
-        except Exception:
-            pass
+            from product_tool import get_all_products, is_product_query
+            if is_product_query(user_query):
+                matched_cards = _extract_product_cards(safe_answer, get_all_products())
+                chat_cards = [c.model_dump() for c in matched_cards]
+                print(f"[ProductCards] query='{user_query[:40]}' matched={len(chat_cards)} cards")
+        except Exception as e:
+            import traceback
+            print(f"[ProductCards] Error extracting cards: {e}")
+            traceback.print_exc()
 
         return ChatResponse(
             answer=safe_answer,
