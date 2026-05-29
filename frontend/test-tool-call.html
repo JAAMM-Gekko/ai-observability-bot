@@ -180,7 +180,7 @@
         This page is for demonstration purposes only. No real products are being sold. All data is fictional.
     </p>
 
-    <!-- Chat Widget -->
+    <!-- Chat Widget (same as main site - shared session/memory) -->
     <div id="chat-widget-button" class="chat-widget-button">
         <i class="fas fa-comment-dots"></i>
     </div>
@@ -189,18 +189,26 @@
         <div class="chat-resize-handle" id="chat-resize-handle" title="Drag to resize"></div>
         <div class="chat-header">
             <div>
-                <h3>Your Budtender</h3>
+                <h3>Company FAQ Assistant</h3>
+                <div id="agent-status" class="agent-status" style="display: none;">
+                    <span class="agent-status-pill">
+                        <i class="fas fa-headset agent-status-icon"></i>
+                        <span class="status-dot"></span>
+                        <span class="agent-status-label">Live agent:</span>
+                        <span id="agent-name" class="agent-status-name">Agent</span>
+                    </span>
+                </div>
             </div>
             <button id="close-button" class="close-button">&times;</button>
         </div>
         <div class="chat-history" id="chat-history">
-            <div class="message bot-message">Hey! Welcome in. I can help you find the right product — just ask me what you're looking for or tell me the vibe you want.</div>
+            <div class="message bot-message">Hello! How can I help you with company FAQs today?</div>
         </div>
         <div id="typing-indicator" class="typing-indicator" style="display: none;">
             <span></span><span></span><span></span>
         </div>
         <div class="chat-input-area">
-            <input type="text" id="user-input" placeholder="Ask me anything..." autocomplete="off">
+            <input type="text" id="user-input" placeholder="Ask a question..." autocomplete="off">
             <button id="send-button">Send</button>
         </div>
         <div class="loading-indicator" id="loading-indicator" style="display: none;">Thinking...</div>
@@ -262,13 +270,10 @@
         renderProducts(null);
     </script>
 
-    <script>
-        window.PERSONA_ID = "budtender-v1";
-    </script>
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
     <script src="/static/markdown-render.js"></script>
-    <script src="/static/persona-script.js"></script>
+    <script src="/static/script.js"></script>
 </body>
 
 </html>
